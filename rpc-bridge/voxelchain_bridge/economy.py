@@ -99,16 +99,82 @@ class PlayerInventory:
 class EconomySystem:
     """Manages the in-game economy."""
 
-    def __init__(self):
+    def __init__(self, persistence=None):
         self.players: Dict[str, PlayerInventory] = {}
         self.market_listings: Dict[str, MarketListing] = {}
         self._next_listing_id = 1
         self.total_vxl_mined = 0.0
         self.block_reward_multiplier = 1.0
+        self._persistence = persistence
+        self._load_from_db()
+
+    def _load_from_db(self):
+        """Load persisted economy data from database."""
+        if not self._persistence:
+            return
+        # Load players
+        for pdata in self._persistence.load_all_players():
+            inv = PlayerInventory(pdata["address"])
+            inv.items = pdata.get("items", {})
+            inv.vxl_balance = pdata.get("vxl_balance", 0.0)
+            inv.total_mined = pdata.get("total_mined", 0)
+            inv.total_placed = pdata.get("total_placed", 0)
+            inv.last_active = pdata.get("last_active", 0)
+            self.players[pdata["address"]] = inv
+        # Load listings
+        for ldata in self._persistence.load_all_listings():
+            listing = MarketListing(
+                listing_id=ldata["listing_id"],
+                seller=ldata["seller"],
+                item_type=ldata["item_type"],
+                item_count=ldata["item_count"],
+                price_vxl=ldata["price_vxl"],
+                created_at=ldata["created_at"],
+                expires_at=ldata.get("expires_at", 0),
+                listing_type=ldata.get("listing_type", "item"),
+                land_x=ldata.get("land_x", 0),
+                land_z=ldata.get("land_z", 0),
+            )
+            self.market_listings[listing.listing_id] = listing
+            # Track next listing ID
+            try:
+                num = int(listing.listing_id.replace("listing_", ""))
+                if num >= self._next_listing_id:
+                    self._next_listing_id = num + 1
+            except ValueError:
+                pass
+        # Load economy stats
+        self.total_vxl_mined = float(self._persistence.load_economy_stat("total_vxl_mined", "0"))
+        logger.info("Loaded %d players, %d listings from database",
+                     len(self.players), len(self.market_listings))
+
+    def _persist_player(self, player: PlayerInventory):
+        """Persist a single player to database."""
+        if self._persistence:
+            self._persistence.save_player(
+                player.address, "", player.items,
+                player.vxl_balance, player.total_mined, player.total_placed
+            )
+
+    def _persist_economy_stats(self):
+        """Persist economy statistics."""
+        if self._persistence:
+            self._persistence.save_economy_stat("total_vxl_mined", str(self.total_vxl_mined))
 
     def get_player(self, address: str) -> PlayerInventory:
         """Get or create player inventory."""
         if address not in self.players:
+            # Try load from DB first
+            if self._persistence:
+                pdata = self._persistence.load_player(address)
+                if pdata:
+                    inv = PlayerInventory(address)
+                    inv.items = pdata.get("items", {})
+                    inv.vxl_balance = pdata.get("vxl_balance", 0.0)
+                    inv.total_mined = pdata.get("total_mined", 0)
+                    inv.total_placed = pdata.get("total_placed", 0)
+                    self.players[address] = inv
+                    return inv
             self.players[address] = PlayerInventory(address)
         player = self.players[address]
         player.last_active = time.time()
@@ -142,6 +208,8 @@ class EconomySystem:
                     "count": reward_info.item_count,
                 }
 
+        self._persist_player(player)
+        self._persist_economy_stats()
         return result
 
     def process_block_place(self, block_type: int, player_address: str) -> dict:
@@ -152,6 +220,7 @@ class EconomySystem:
         # Consume block from inventory (if they have it)
         had_block = player.remove_item(block_type)
 
+        self._persist_player(player)
         return {
             "player": player_address,
             "blockType": block_type,
@@ -190,6 +259,12 @@ class EconomySystem:
         )
         self.market_listings[listing_id] = listing
 
+        self._persist_player(player)
+        if self._persistence:
+            self._persistence.save_listing(
+                listing_id, seller, item_type, item_count, price_vxl,
+                now, listing.expires_at, listing_type, land_x, land_z
+            )
         return {
             "listingId": listing_id,
             "seller": seller,
@@ -226,6 +301,10 @@ class EconomySystem:
         # Remove listing
         del self.market_listings[listing_id]
 
+        self._persist_player(buyer_inv)
+        self._persist_player(seller_inv)
+        if self._persistence:
+            self._persistence.delete_listing(listing_id)
         return {
             "listingId": listing_id,
             "buyer": buyer,
@@ -247,6 +326,9 @@ class EconomySystem:
             player.add_item(listing.item_type, listing.item_count)
 
         del self.market_listings[listing_id]
+        if self._persistence:
+            self._persistence.delete_listing(listing_id)
+            self._persist_player(player)
         return True
 
     def get_active_listings(self, listing_type: str = "all") -> List[dict]:

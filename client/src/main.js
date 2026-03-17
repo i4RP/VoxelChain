@@ -88,6 +88,28 @@ class VoxelChainGame {
     // Window resize
     window.addEventListener("resize", () => this._onResize());
 
+    // Chat input - press T to open, Enter to send, Escape to cancel
+    this.ui.setupChatInput((message) => {
+      if (this.blockchain.connected && this._playerAddress) {
+        this.blockchain.sendWS({
+          type: "chat",
+          sender: this._playerAddress,
+          message: message,
+        });
+      }
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "KeyT" && !e.ctrlKey && !e.metaKey) {
+        const chatInput = document.getElementById("chat-input");
+        if (chatInput && chatInput.classList.contains("hidden")) {
+          e.preventDefault();
+          chatInput.classList.remove("hidden");
+          chatInput.focus();
+          if (this.input) this.input.release();
+        }
+      }
+    });
+
     // AI Agent Support
     this.ui.setLoadProgress(85, "Setting up AI systems...");
     this._setupAISupport();
@@ -240,10 +262,20 @@ class VoxelChainGame {
   _setupBlockchainListeners() {
     this.blockchain.on("connected", () => {
       this.ui.addChatMessage("Connected to VoxelChain node", "#10b981");
+      this.ui.setConnectionStatus(true);
+      // Auto-join multiplayer session
+      this._joinMultiplayer();
     });
 
     this.blockchain.on("disconnected", () => {
-      this.ui.addChatMessage("Disconnected from node, reconnecting...", "#ef4444");
+      this.ui.setConnectionStatus(false);
+    });
+
+    this.blockchain.on("reconnecting", (data) => {
+      this.ui.addChatMessage(
+        `Reconnecting... (attempt ${data.attempt})`,
+        "#f59e0b"
+      );
     });
 
     this.blockchain.on("blockUpdate", (data) => {
@@ -274,6 +306,146 @@ class VoxelChainGame {
     this.blockchain.on("error", (data) => {
       this.ui.addChatMessage(`Error: ${data.error}`, "#ef4444");
     });
+
+    // Multiplayer events
+    this.blockchain.on("message", (data) => {
+      this._handleServerMessage(data);
+    });
+  }
+
+  /** Join multiplayer session */
+  _joinMultiplayer() {
+    const address = this.blockchain.walletAddress || "0x" + Math.random().toString(16).slice(2, 14);
+    const pos = this.input.position;
+    this.blockchain.sendWS({
+      type: "playerJoin",
+      address: address,
+      displayName: address.substring(0, 8) + "...",
+      position: { x: pos.x, y: pos.y, z: pos.z },
+    });
+    this._playerAddress = address;
+
+    // Start position update interval
+    if (this._posUpdateInterval) clearInterval(this._posUpdateInterval);
+    this._posUpdateInterval = setInterval(() => {
+      if (this.blockchain.connected) {
+        const p = this.input.position;
+        this.blockchain.sendWS({
+          type: "updatePosition",
+          address: this._playerAddress,
+          position: { x: p.x, y: p.y, z: p.z },
+          lookDirection: {
+            yaw: this.input.euler.y,
+            pitch: this.input.euler.x,
+          },
+        });
+      }
+    }, 200);
+  }
+
+  /** Handle multiplayer and game messages from server */
+  _handleServerMessage(data) {
+    switch (data.type) {
+      case "joinResult":
+        if (data.success) {
+          this.ui.addChatMessage(
+            `Joined world (${data.onlinePlayers} online)`,
+            "#7c3aed"
+          );
+        }
+        break;
+
+      case "playerJoined":
+        if (data.player && data.player.address !== this._playerAddress) {
+          this.ui.addChatMessage(
+            `${data.player.displayName} joined the world`,
+            "#10b981"
+          );
+          this._updatePlayerAvatar(data.player);
+        }
+        break;
+
+      case "playerLeft":
+        if (data.address !== this._playerAddress) {
+          this._removePlayerAvatar(data.address);
+          this.ui.addChatMessage(`Player left`, "#666");
+        }
+        break;
+
+      case "playerMoved":
+        if (data.address !== this._playerAddress) {
+          this._updatePlayerAvatar({
+            address: data.address,
+            position: data.position,
+          });
+        }
+        break;
+
+      case "chat":
+        this.ui.addChatMessage(
+          `<${data.displayName}> ${data.message}`,
+          "#e0e0e0"
+        );
+        break;
+
+      case "worldChange":
+        if (data.x !== undefined && data.y !== undefined && data.z !== undefined) {
+          this.world.setBlock(data.x, data.y, data.z, data.blockType || 0);
+        }
+        break;
+    }
+  }
+
+  /** Update or create player avatar mesh */
+  _updatePlayerAvatar(player) {
+    if (!this._playerAvatars) this._playerAvatars = new Map();
+
+    let avatar = this._playerAvatars.get(player.address);
+    if (!avatar) {
+      // Create simple avatar mesh (colored box)
+      const bodyGeo = new THREE.BoxGeometry(0.6, 1.6, 0.6);
+      const bodyMat = new THREE.MeshLambertMaterial({ color: this._playerColor(player.address) });
+      avatar = new THREE.Mesh(bodyGeo, bodyMat);
+
+      // Name tag
+      const headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+      const headMat = new THREE.MeshLambertMaterial({ color: 0xffcc99 });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 1.05;
+      avatar.add(head);
+
+      this.scene.add(avatar);
+      this._playerAvatars.set(player.address, avatar);
+    }
+
+    if (player.position) {
+      avatar.position.set(
+        player.position.x,
+        player.position.y + 0.8,
+        player.position.z
+      );
+    }
+  }
+
+  /** Remove player avatar */
+  _removePlayerAvatar(address) {
+    if (!this._playerAvatars) return;
+    const avatar = this._playerAvatars.get(address);
+    if (avatar) {
+      this.scene.remove(avatar);
+      avatar.geometry.dispose();
+      avatar.material.dispose();
+      this._playerAvatars.delete(address);
+    }
+  }
+
+  /** Generate a deterministic color from an address string */
+  _playerColor(address) {
+    let hash = 0;
+    for (let i = 0; i < address.length; i++) {
+      hash = address.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return (hash & 0x00FFFFFF);
   }
 
   _handleBlockPlace() {

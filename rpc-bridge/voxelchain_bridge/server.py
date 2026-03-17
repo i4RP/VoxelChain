@@ -8,7 +8,9 @@ import asyncio
 import json
 import logging
 import argparse
+import os
 import time
+from collections import defaultdict
 from typing import Any, Optional
 
 import aiohttp
@@ -17,6 +19,7 @@ from aiohttp import web
 from .config import BridgeConfig
 from .handlers import EthRPCHandlers
 from .node_client import RPCError, VoxelChainNodeClient
+from .persistence import PersistenceLayer
 from .virtual_blocks import VirtualBlockEngine
 from .voxel_world import VoxelWorld
 
@@ -24,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 FAUCET_COOLDOWN = 3600
 FAUCET_AMOUNT = 100.0
+
+# Rate limiting: max requests per minute per IP
+RATE_LIMIT_RPC = 120
+RATE_LIMIT_WS_MSG = 60
+RATE_LIMIT_WINDOW = 60  # seconds
 
 
 class VoxelChainBridgeServer:
@@ -35,17 +43,23 @@ class VoxelChainBridgeServer:
         self.vblock_engine = VirtualBlockEngine(
             self.node_client, data_dir=config.vblock_data_dir,
         )
+        self.persistence = PersistenceLayer(
+            db_path=config.vblock_data_dir + "/voxelchain.db",
+        )
         self.voxel_world = VoxelWorld(
             data_dir=config.vblock_data_dir + "/world",
             chunk_size=config.chunk_size,
+            persistence=self.persistence,
         )
         self.handlers = EthRPCHandlers(
             config, self.node_client, self.vblock_engine, self.voxel_world,
+            persistence=self.persistence,
         )
         self.app = web.Application()
         self._faucet_last_request: dict[str, float] = {}
         self._ws_clients: set = set()
         self._ws_last_block: int = 0
+        self._rate_limits: dict[str, list] = defaultdict(list)
         self._setup_routes()
 
     def _setup_routes(self):
@@ -54,8 +68,21 @@ class VoxelChainBridgeServer:
         self.app.router.add_get("/ws", self.handle_websocket)
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/api/info", self.handle_info)
-        # Serve static files for explorer and client
         self.app.router.add_post("/", self.handle_rpc)
+
+        # Serve explorer static files
+        explorer_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "explorer"
+        )
+        if os.path.isdir(explorer_dir):
+            self.app.router.add_get("/explorer", self._serve_explorer)
+            self.app.router.add_get("/explorer/{path:.*}", self._serve_explorer_static)
+            self._explorer_dir = explorer_dir
+            logger.info("Serving explorer from %s", explorer_dir)
+        else:
+            self._explorer_dir = None
+            logger.warning("Explorer directory not found: %s", explorer_dir)
 
     async def handle_faucet(self, request: web.Request) -> web.Response:
         try:
@@ -143,19 +170,37 @@ class VoxelChainBridgeServer:
                             x, y, z = data.get("x", 0), data.get("y", 0), data.get("z", 0)
                             block_type = data.get("blockType", 1)
                             player = data.get("player", "")
+                            old_block = self.voxel_world.get_block(x, y, z)
                             change = self.voxel_world.place_block(x, y, z, block_type, player)
                             await ws.send_json({"type": "blockPlaced", **change})
                             # Broadcast to all clients
                             await self._ws_broadcast({"type": "worldChange", **change})
+                            # Log and award rewards
+                            if self.persistence:
+                                self.persistence.log_block_change(
+                                    x, y, z, old_block.block_type, block_type, player
+                                )
+                            if player:
+                                self.handlers.economy.process_block_place(block_type, player)
                         except ValueError as e:
                             await ws.send_json({"type": "error", "message": str(e)})
                     elif msg_type == "breakBlock":
                         try:
                             x, y, z = data.get("x", 0), data.get("y", 0), data.get("z", 0)
                             player = data.get("player", "")
+                            old_block = self.voxel_world.get_block(x, y, z)
                             change = self.voxel_world.break_block(x, y, z, player)
                             await ws.send_json({"type": "blockBroken", **change})
                             await self._ws_broadcast({"type": "worldChange", **change})
+                            # Log and award rewards
+                            if self.persistence:
+                                self.persistence.log_block_change(
+                                    x, y, z, old_block.block_type, 0, player
+                                )
+                            if player:
+                                self.handlers.economy.process_block_break(
+                                    old_block.block_type, player
+                                )
                         except ValueError as e:
                             await ws.send_json({"type": "error", "message": str(e)})
                     elif msg_type == "subscribe":
@@ -270,7 +315,49 @@ class VoxelChainBridgeServer:
             "connectedClients": len(self._ws_clients),
         })
 
+    async def _serve_explorer(self, request: web.Request) -> web.Response:
+        """Serve explorer index.html."""
+        if not self._explorer_dir:
+            return web.Response(text="Explorer not available", status=404)
+        index_path = os.path.join(self._explorer_dir, "index.html")
+        if os.path.exists(index_path):
+            return web.FileResponse(index_path)
+        return web.Response(text="Explorer not found", status=404)
+
+    async def _serve_explorer_static(self, request: web.Request) -> web.Response:
+        """Serve explorer static assets."""
+        if not self._explorer_dir:
+            return web.Response(text="Explorer not available", status=404)
+        rel_path = request.match_info.get("path", "")
+        file_path = os.path.join(self._explorer_dir, rel_path)
+        # Prevent directory traversal
+        real_path = os.path.realpath(file_path)
+        real_dir = os.path.realpath(self._explorer_dir)
+        if not real_path.startswith(real_dir):
+            return web.Response(text="Forbidden", status=403)
+        if os.path.isfile(file_path):
+            return web.FileResponse(file_path)
+        return web.Response(text="Not found", status=404)
+
+    def _check_rate_limit(self, client_ip: str, limit: int = RATE_LIMIT_RPC) -> bool:
+        """Check if client IP has exceeded rate limit. Returns True if allowed."""
+        now = time.time()
+        timestamps = self._rate_limits[client_ip]
+        # Remove old timestamps outside the window
+        cutoff = now - RATE_LIMIT_WINDOW
+        self._rate_limits[client_ip] = [t for t in timestamps if t > cutoff]
+        if len(self._rate_limits[client_ip]) >= limit:
+            return False
+        self._rate_limits[client_ip].append(now)
+        return True
+
     async def handle_rpc(self, request: web.Request) -> web.Response:
+        client_ip = request.headers.get("X-Real-IP", request.remote or "unknown")
+        if not self._check_rate_limit(client_ip, RATE_LIMIT_RPC):
+            return web.json_response(
+                _error_response(None, -32000, "Rate limit exceeded"), status=429,
+            )
+
         try:
             body = await request.json()
         except json.JSONDecodeError:

@@ -140,3 +140,15 @@ body { background: #000; overflow: hidden; font-family: 'Segoe UI', system-ui, s
 }
 #block-info-name { font-weight: 600; display: block; }
 #block-info-pos { color: var(--dim); font-family: monospace; font-size: 0.75rem; }
+
+/* Connection Status */
+.conn-status {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block; transition: background 0.3s;
+}
+.conn-status.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.conn-status.disconnected { background: #ef4444; box-shadow: 0 0 6px #ef4444; animation: pulse-red 1.5s infinite; }
+@keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
