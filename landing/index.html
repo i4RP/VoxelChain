@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxelChain - On-Chain Voxel World</title>
+    <style>
+        :root {
+            --purple: #7c3aed;
+            --green: #10b981;
+            --bg: #0a0a0f;
+            --card: rgba(18, 18, 26, 0.9);
+            --border: rgba(30, 30, 46, 0.8);
+            --text: #e0e0e0;
+            --dim: #888;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* Hero */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 30% 20%, rgba(124, 58, 237, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 80%, rgba(16, 185, 129, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        .hero-content { position: relative; z-index: 1; max-width: 800px; }
+        .logo {
+            font-size: 4rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .logo span:first-child { color: var(--purple); }
+        .logo span:last-child { color: var(--green); }
+        .tagline {
+            font-size: 1.3rem;
+            color: var(--dim);
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        .hero-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+        .btn {
+            padding: 14px 32px;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+            border: none;
+        }
+        .btn:hover { transform: translateY(-2px); }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--purple), #6d28d9);
+            color: white;
+            box-shadow: 0 4px 20px rgba(124, 58, 237, 0.4);
+        }
+        .btn-primary:hover { box-shadow: 0 6px 30px rgba(124, 58, 237, 0.6); }
+        .btn-secondary {
+            background: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { border-color: var(--purple); }
+
+        /* Voxel animation canvas */
+        .hero-visual {
+            margin-top: 3rem;
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 16/9;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+        .hero-visual canvas { width: 100%; height: 100%; display: block; }
+
+        /* Stats bar */
+        .stats {
+            display: flex;
+            gap: 3rem;
+            justify-content: center;
+            padding: 2rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+        .stat { text-align: center; }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--green);
+        }
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--dim);
+            margin-top: 0.25rem;
+        }
+
+        /* Features */
+        .features {
+            padding: 5rem 2rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        .section-title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+        .feature-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            transition: border-color 0.3s, transform 0.3s;
+        }
+        .feature-card:hover {
+            border-color: var(--purple);
+            transform: translateY(-4px);
+        }
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        .feature-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            color: white;
+        }
+        .feature-card p {
+            color: var(--dim);
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
+        /* Tech stack */
+        .tech {
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+        .tech-grid {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 2rem;
+        }
+        .tech-badge {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* Architecture */
+        .architecture {
+            padding: 4rem 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .arch-diagram {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.8;
+            color: var(--dim);
+            overflow-x: auto;
+            white-space: pre;
+            text-align: center;
+        }
+        .arch-diagram .highlight { color: var(--purple); font-weight: bold; }
+        .arch-diagram .green { color: var(--green); }
+
+        /* Footer */
+        footer {
+            padding: 3rem 2rem;
+            text-align: center;
+            border-top: 1px solid var(--border);
+            color: var(--dim);
+            font-size: 0.85rem;
+        }
+        footer a { color: var(--purple); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+
+        /* Mobile */
+        @media (max-width: 768px) {
+            .logo { font-size: 2.5rem; }
+            .tagline { font-size: 1rem; }
+            .stats { gap: 1.5rem; }
+            .stat-value { font-size: 1.5rem; }
+            .section-title { font-size: 1.6rem; }
+            .feature-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <section class="hero">
+        <div class="hero-content">
+            <div class="logo"><span>Voxel</span><span>Chain</span></div>
+            <p class="tagline">
+                Build, mine, and trade in a fully on-chain voxel world.<br>
+                Every block placement is a transaction. Every creation is permanent.
+            </p>
+            <div class="hero-buttons">
+                <a href="/client/" class="btn btn-primary">Play Now</a>
+                <a href="/explorer/" class="btn btn-secondary">Explorer</a>
+                <a href="https://github.com/i4RP/VoxelChain" class="btn btn-secondary" target="_blank">GitHub</a>
+            </div>
+
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value">21</div>
+                    <div class="stat-label">Block Types</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">0.01s</div>
+                    <div class="stat-label">Virtual Block Time</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">16<sup>3</sup></div>
+                    <div class="stat-label">Chunk Size</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">EVM</div>
+                    <div class="stat-label">Compatible</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="hero-visual">
+            <canvas id="hero-canvas"></canvas>
+        </div>
+    </section>
+
+    <section class="features">
+        <h2 class="section-title">Features</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">&#x26d3;</div>
+                <h3>On-Chain World State</h3>
+                <p>Every block placement and destruction is recorded as a transaction on the VoxelChain EVM network with Merkle tree verification.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1f3ae;</div>
+                <h3>Browser-Based 3D</h3>
+                <p>Play directly in your browser with Three.js WebGL rendering. No downloads, no installs. Desktop and mobile supported.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1f4b0;</div>
+                <h3>Game Economy</h3>
+                <p>Mine rare ores for VXL rewards. Trade blocks on the marketplace. Craft tools and materials with 12+ recipes.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1f465;</div>
+                <h3>Multiplayer</h3>
+                <p>Real-time player sync with avatar rendering. Chat with other players. See who's building what in the shared world.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1f916;</div>
+                <h3>AI Agent API</h3>
+                <p>30+ programmatic commands for AI agents. A* pathfinding, structured state snapshots, and external process communication.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1f50d;</div>
+                <h3>Block Explorer</h3>
+                <p>Full-featured explorer with world overview, economy stats, player tracking, marketplace, crafting recipes, and faucet.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="architecture">
+        <h2 class="section-title">Architecture</h2>
+        <div class="arch-diagram"><span class="highlight">Browser Client</span>  (Three.js + WebGL)
+        |
+        | WebSocket + JSON-RPC
+        v
+<span class="green">RPC Bridge</span>  (Python / aiohttp)
+   |-- Virtual Block Engine (0.01s blocks)
+   |-- Voxel World Manager (16x16x16 chunks)
+   |-- Economy System (mining rewards, marketplace)
+   |-- Multiplayer (position sync, chat)
+   |-- SQLite Persistence (WAL mode)
+        |
+        v
+<span class="highlight">VoxelChain EVM Node</span>  (TeraETH-based)
+   |-- Chain ID: 0xBF6C9 (784201)
+   |-- Currency: VXL
+   |-- Smart Contracts: ERC-721 Land + ERC-1155 Items</div>
+    </section>
+
+    <section class="tech">
+        <h2 class="section-title">Tech Stack</h2>
+        <div class="tech-grid">
+            <span class="tech-badge">Three.js / WebGL</span>
+            <span class="tech-badge">Python / aiohttp</span>
+            <span class="tech-badge">Solidity 0.8</span>
+            <span class="tech-badge">SQLite (WAL)</span>
+            <span class="tech-badge">Web Audio API</span>
+            <span class="tech-badge">WebSocket</span>
+            <span class="tech-badge">Docker</span>
+            <span class="tech-badge">EVM Compatible</span>
+        </div>
+    </section>
+
+    <footer>
+        <p>VoxelChain &mdash; Open Source On-Chain Voxel Game Engine</p>
+        <p style="margin-top: 0.5rem;">
+            <a href="https://github.com/i4RP/VoxelChain">GitHub</a> &middot;
+            <a href="/explorer/">Explorer</a> &middot;
+            <a href="/client/?ai=true">AI Mode</a>
+        </p>
+    </footer>
+
+    <script>
+        // Animated isometric voxel scene on hero canvas
+        (function() {
+            const canvas = document.getElementById('hero-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+
+            function resize() {
+                const rect = canvas.parentElement.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.scale(dpr, dpr);
+                canvas.style.width = rect.width + 'px';
+                canvas.style.height = rect.height + 'px';
+            }
+            resize();
+            window.addEventListener('resize', resize);
+
+            const COLORS = [
+                { top: '#32a632', side: '#228b22', front: '#1a6b1a' }, // grass
+                { top: '#9b5523', side: '#8b4513', front: '#7b3503' }, // dirt
+                { top: '#909090', side: '#808080', front: '#606060' }, // stone
+                { top: '#ffb470', side: '#f4a460', front: '#d48440' }, // sand
+                { top: '#ffd700', side: '#daa520', front: '#b8860b' }, // gold
+                { top: '#b22222', side: '#8b1a1a', front: '#6b0a0a' }, // brick
+            ];
+
+            // Generate a small heightmap
+            const W = 12, D = 12;
+            const map = [];
+            for (let z = 0; z < D; z++) {
+                map[z] = [];
+                for (let x = 0; x < W; x++) {
+                    const cx = x - W/2, cz = z - D/2;
+                    const h = Math.max(1, Math.round(3 + 2 * Math.sin(cx * 0.5) * Math.cos(cz * 0.5) + Math.random()));
+                    map[z][x] = { h, color: h > 4 ? 0 : h > 2 ? (Math.random() > 0.8 ? 4 : 0) : 1 };
+                }
+            }
+
+            let time = 0;
+            const tileW = 28, tileH = 14, blockH = 12;
+
+            function toIso(x, y, z) {
+                return {
+                    sx: (x - z) * tileW / 2,
+                    sy: (x + z) * tileH / 2 - y * blockH,
+                };
+            }
+
+            function drawBlock(x, y, z, ci) {
+                const c = COLORS[ci % COLORS.length];
+                const { sx, sy } = toIso(x, y, z);
+                const rect = canvas.parentElement.getBoundingClientRect();
+                const ox = rect.width / 2 + sx;
+                const oy = rect.height / 2 + sy - 20;
+
+                // Top face
+                ctx.fillStyle = c.top;
+                ctx.beginPath();
+                ctx.moveTo(ox, oy - tileH);
+                ctx.lineTo(ox + tileW/2, oy - tileH/2);
+                ctx.lineTo(ox, oy);
+                ctx.lineTo(ox - tileW/2, oy - tileH/2);
+                ctx.closePath();
+                ctx.fill();
+
+                // Left face
+                ctx.fillStyle = c.side;
+                ctx.beginPath();
+                ctx.moveTo(ox - tileW/2, oy - tileH/2);
+                ctx.lineTo(ox, oy);
+                ctx.lineTo(ox, oy + blockH);
+                ctx.lineTo(ox - tileW/2, oy + blockH - tileH/2);
+                ctx.closePath();
+                ctx.fill();
+
+                // Right face
+                ctx.fillStyle = c.front;
+                ctx.beginPath();
+                ctx.moveTo(ox + tileW/2, oy - tileH/2);
+                ctx.lineTo(ox, oy);
+                ctx.lineTo(ox, oy + blockH);
+                ctx.lineTo(ox + tileW/2, oy + blockH - tileH/2);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            function animate() {
+                const rect = canvas.parentElement.getBoundingClientRect();
+                ctx.clearRect(0, 0, rect.width, rect.height);
+
+                time += 0.02;
+
+                // Draw back to front
+                for (let z = 0; z < D; z++) {
+                    for (let x = 0; x < W; x++) {
+                        const { h, color } = map[z][x];
+                        const wave = Math.sin(time + x * 0.4 + z * 0.3) * 0.3;
+                        const drawH = Math.max(1, Math.round(h + wave));
+                        for (let y = 0; y < drawH; y++) {
+                            const ci = y === drawH - 1 ? color : (y === 0 ? 2 : 1);
+                            drawBlock(x - W/2, y, z - D/2, ci);
+                        }
+                    }
+                }
+                requestAnimationFrame(animate);
+            }
+            animate();
+        })();
+    </script>
+</body>
+</html>
