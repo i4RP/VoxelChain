@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  rpc-bridge:
+    build:
+      context: ./rpc-bridge
+      dockerfile: Dockerfile
+    container_name: voxelchain-rpc-bridge
+    ports:
+      - "8546:8546"
+    volumes:
+      - voxelchain-data:/data
+      - ./explorer:/app/explorer:ro
+    environment:
+      - VOXELCHAIN_DATA_DIR=/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8546/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: voxelchain-client
+    ports:
+      - "80:80"
+    depends_on:
+      rpc-bridge:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  voxelchain-data:

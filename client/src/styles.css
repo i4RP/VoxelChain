@@ -152,3 +152,74 @@ body { background: #000; overflow: hidden; font-family: 'Segoe UI', system-ui, s
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
 }
+
+/* Touch Controls (mobile) */
+#touch-overlay {
+    position: fixed; inset: 0; z-index: 15; pointer-events: none;
+    display: none;
+}
+#touch-joystick-zone {
+    position: absolute; left: 0; bottom: 0; width: 50%; height: 50%;
+    pointer-events: auto; touch-action: none;
+}
+#touch-look-zone {
+    position: absolute; right: 0; top: 0; width: 50%; height: 100%;
+    pointer-events: auto; touch-action: none;
+}
+#touch-joystick-base {
+    position: absolute; width: 100px; height: 100px;
+    left: 60px; bottom: 100px;
+    border: 2px solid rgba(255,255,255,0.25);
+    border-radius: 50%; opacity: 0.5;
+    display: flex; align-items: center; justify-content: center;
+}
+#touch-joystick-knob {
+    width: 40px; height: 40px; background: rgba(124, 58, 237, 0.6);
+    border-radius: 50%; transition: transform 0.05s;
+}
+#touch-buttons {
+    position: absolute; right: 12px; bottom: 80px;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: auto;
+}
+.touch-btn {
+    width: 60px; height: 60px; border-radius: 50%;
+    background: rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.2);
+    color: white; font-size: 0.7rem; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; touch-action: none; user-select: none;
+    -webkit-user-select: none;
+}
+.touch-btn:active { background: rgba(124, 58, 237, 0.5); border-color: var(--purple); }
+.touch-btn.active { background: rgba(124, 58, 237, 0.4); border-color: var(--purple); }
+.touch-btn.touch-btn-small { width: 44px; height: 44px; font-size: 0.6rem; }
+
+/* Sound toggle button */
+#sound-toggle {
+    background: none; border: 1px solid var(--border);
+    color: var(--dim); padding: 4px 8px; border-radius: 4px;
+    font-size: 0.75rem; cursor: pointer;
+}
+#sound-toggle:hover { border-color: var(--purple); color: var(--text); }
+
+/* Mobile responsive */
+@media (pointer: coarse), (max-width: 768px) {
+    #touch-overlay { display: block; }
+    #crosshair { width: 16px; height: 16px; }
+    #crosshair::before { width: 1px; height: 16px; left: 7px; }
+    #crosshair::after { width: 16px; height: 1px; top: 7px; }
+    #hud { padding: 6px 10px; }
+    .hud-badge { font-size: 0.7rem; padding: 3px 6px; }
+    #hud-pos { font-size: 0.7rem; }
+    #chat { width: 260px; bottom: 160px; }
+    .chat-msg { font-size: 0.7rem; }
+    #chat-input { font-size: 0.8rem; }
+    #minimap { top: 40px; right: 8px; }
+    #minimap-canvas { width: 100px; height: 100px; }
+    #hotbar { bottom: 8px; }
+    .hotbar-slot { width: 36px; height: 36px; }
+    .hotbar-slot .block-preview { width: 24px; height: 24px; }
+    .hotbar-slot .slot-num { font-size: 0.5rem; }
+    #wallet-btn { padding: 4px 10px; font-size: 0.7rem; }
+    #block-info { font-size: 0.7rem; right: 8px; }
+}

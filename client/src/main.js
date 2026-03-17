@@ -13,6 +13,8 @@ import { GameCommandAPI } from "./engine/GameCommandAPI.js";
 import { Pathfinder } from "./engine/Pathfinder.js";
 import { AIObserver } from "./engine/AIObserver.js";
 import { AICommandServer } from "./engine/AICommandServer.js";
+import { SoundManager } from "./engine/SoundManager.js";
+import { TouchController } from "./engine/TouchController.js";
 
 class VoxelChainGame {
   constructor() {
@@ -29,6 +31,11 @@ class VoxelChainGame {
     this.pathfinder = null;
     this.observer = null;
     this.commandServer = null;
+
+    // Sound & touch
+    this.sound = null;
+    this.touch = null;
+    this._footstepTimer = 0;
 
     this.clock = new THREE.Clock();
     this.frameCount = 0;
@@ -110,6 +117,20 @@ class VoxelChainGame {
       }
     });
 
+    // Sound system
+    this.sound = new SoundManager();
+    this.sound.init();
+    const soundBtn = document.getElementById("sound-toggle");
+    if (soundBtn) {
+      soundBtn.addEventListener("click", () => {
+        const on = this.sound.toggle();
+        soundBtn.textContent = on ? "Sound: ON" : "Sound: OFF";
+      });
+    }
+
+    // Touch controls (auto-detects mobile)
+    this.touch = new TouchController(this.input);
+
     // AI Agent Support
     this.ui.setLoadProgress(85, "Setting up AI systems...");
     this._setupAISupport();
@@ -119,12 +140,24 @@ class VoxelChainGame {
     await new Promise((r) => setTimeout(r, 400));
     this.ui.hideLoading();
 
-    if (this.input.aiMode) {
+    if (this.input.aiMode && !this.touch.enabled) {
       this.ui.addChatMessage("VoxelChain AI Mode active. Use game.api.help() for commands.", "#7c3aed");
+    } else if (this.touch.enabled) {
+      this.ui.addChatMessage("Welcome to VoxelChain! Use joystick to move, swipe to look.", "#7c3aed");
     } else {
       this.ui.addChatMessage("Welcome to VoxelChain! Click to enter, WASD to move, F to toggle fly.", "#7c3aed");
       this.ui.addChatMessage("Left-click to break, right-click to place. 1-9 for blocks.", "#666");
     }
+
+    // Start ambient sound after first user interaction
+    const startAudio = () => {
+      this.sound.resume();
+      this.sound.startAmbient();
+      document.removeEventListener("click", startAudio);
+      document.removeEventListener("touchstart", startAudio);
+    };
+    document.addEventListener("click", startAudio);
+    document.addEventListener("touchstart", startAudio);
     this.running = true;
     this._animate();
   }
@@ -386,6 +419,7 @@ class VoxelChainGame {
           `<${data.displayName}> ${data.message}`,
           "#e0e0e0"
         );
+        this.sound.playChatReceive();
         break;
 
       case "worldChange":
@@ -459,6 +493,7 @@ class VoxelChainGame {
 
       // Place locally first (optimistic)
       this.world.setBlock(pos.x, pos.y, pos.z, blockType);
+      this.sound.playBlockPlace();
 
       // Submit to blockchain
       const player = this.blockchain.walletAddress || "";
@@ -480,6 +515,7 @@ class VoxelChainGame {
 
       // Remove locally first (optimistic)
       this.world.setBlock(pos.x, pos.y, pos.z, 0);
+      this.sound.playBlockBreak();
 
       // Submit to blockchain
       const player = this.blockchain.walletAddress || "";
@@ -508,6 +544,22 @@ class VoxelChainGame {
     // Update
     this.input.update(dt);
     this.world.update(this.input.position);
+
+    // Footstep sounds (walking mode only)
+    if (!this.input.flyMode && this.input.onGround && this.input.isLocked) {
+      const moving = this.input.keys["KeyW"] || this.input.keys["KeyS"] ||
+                     this.input.keys["KeyA"] || this.input.keys["KeyD"];
+      if (moving) {
+        this._footstepTimer += dt;
+        const interval = this.input.keys["ShiftLeft"] ? 0.3 : 0.45;
+        if (this._footstepTimer >= interval) {
+          this.sound.playFootstep();
+          this._footstepTimer = 0;
+        }
+      } else {
+        this._footstepTimer = 0;
+      }
+    }
 
     // Block highlight (raycast)
     const ray = this.world.raycast(

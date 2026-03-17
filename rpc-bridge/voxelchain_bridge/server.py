@@ -71,10 +71,8 @@ class VoxelChainBridgeServer:
         self.app.router.add_post("/", self.handle_rpc)
 
         # Serve explorer static files
-        explorer_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "explorer"
-        )
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        explorer_dir = os.path.join(project_root, "explorer")
         if os.path.isdir(explorer_dir):
             self.app.router.add_get("/explorer", self._serve_explorer)
             self.app.router.add_get("/explorer/{path:.*}", self._serve_explorer_static)
@@ -83,6 +81,16 @@ class VoxelChainBridgeServer:
         else:
             self._explorer_dir = None
             logger.warning("Explorer directory not found: %s", explorer_dir)
+
+        # Serve landing page
+        landing_dir = os.path.join(project_root, "landing")
+        if os.path.isdir(landing_dir):
+            self.app.router.add_get("/landing", self._serve_landing)
+            self.app.router.add_get("/landing/{path:.*}", self._serve_landing_static)
+            self._landing_dir = landing_dir
+            logger.info("Serving landing page from %s", landing_dir)
+        else:
+            self._landing_dir = None
 
     async def handle_faucet(self, request: web.Request) -> web.Response:
         try:
@@ -333,6 +341,29 @@ class VoxelChainBridgeServer:
         # Prevent directory traversal
         real_path = os.path.realpath(file_path)
         real_dir = os.path.realpath(self._explorer_dir)
+        if not real_path.startswith(real_dir):
+            return web.Response(text="Forbidden", status=403)
+        if os.path.isfile(file_path):
+            return web.FileResponse(file_path)
+        return web.Response(text="Not found", status=404)
+
+    async def _serve_landing(self, request: web.Request) -> web.Response:
+        """Serve landing page index.html."""
+        if not self._landing_dir:
+            return web.Response(text="Landing page not available", status=404)
+        index_path = os.path.join(self._landing_dir, "index.html")
+        if os.path.exists(index_path):
+            return web.FileResponse(index_path)
+        return web.Response(text="Landing page not found", status=404)
+
+    async def _serve_landing_static(self, request: web.Request) -> web.Response:
+        """Serve landing page static assets."""
+        if not self._landing_dir:
+            return web.Response(text="Landing page not available", status=404)
+        rel_path = request.match_info.get("path", "")
+        file_path = os.path.join(self._landing_dir, rel_path)
+        real_path = os.path.realpath(file_path)
+        real_dir = os.path.realpath(self._landing_dir)
         if not real_path.startswith(real_dir):
             return web.Response(text="Forbidden", status=403)
         if os.path.isfile(file_path):
