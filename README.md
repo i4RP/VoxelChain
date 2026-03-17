@@ -49,16 +49,34 @@ VoxelChain/
 │       ├── virtual_blocks.py # Virtual block engine (0.01s)
 │       ├── voxel_world.py    # Chunk-based voxel world state
 │       ├── eth_tx_decoder.py # Raw ETH transaction decoder
-│       ├── handlers.py       # RPC method handlers
-│       └── server.py         # HTTP/WS server
+│       ├── handlers.py       # RPC method handlers (ETH + game_* methods)
+│       ├── server.py         # HTTP/WS server with multiplayer events
+│       ├── terrain_gen.py    # Server-side procedural terrain generation
+│       ├── crafting.py       # Crafting system (12 recipes)
+│       ├── economy.py        # Mining rewards, marketplace, player inventory
+│       └── multiplayer.py    # Player sessions, presence, event broadcasting
 ├── contracts/                # Solidity smart contracts
 │   ├── VoxelLand.sol         # Land ownership NFT (ERC-721)
 │   ├── VoxelItems.sol        # Game items (ERC-1155)
 │   └── hardhat.config.js
-├── explorer/                 # Block explorer with 3D world viewer
-│   └── index.html
-├── client/                   # Browser-based voxel game client
-│   └── index.html
+├── explorer/                 # Block explorer with 7-tab interface
+│   └── index.html            # Overview, World, Economy, Players, Marketplace, Crafting, Faucet
+├── client/                   # Browser-based 3D voxel game client
+│   ├── package.json          # Vite + Three.js dependencies
+│   ├── vite.config.js        # Dev server configuration
+│   └── src/
+│       ├── index.html        # Game HTML shell
+│       ├── main.js           # Game initialization & render loop
+│       ├── styles.css         # Game UI styles
+│       └── engine/
+│           ├── BlockRegistry.js    # 21 block types with properties
+│           ├── Chunk.js            # 16x16x16 voxel chunks with greedy meshing
+│           ├── WorldManager.js     # Chunk loading/unloading by view distance
+│           ├── TerrainGenerator.js # Noise-based biomes (desert, snow, forest, plains)
+│           ├── BlockchainSync.js   # WebSocket + JSON-RPC blockchain integration
+│           ├── InputController.js  # FPS controls (WASD, mouse, collision, fly mode)
+│           ├── UIManager.js        # HUD, hotbar, minimap, inventory, chat
+│           └── WalletManager.js    # MetaMask connection, chain switching, TX signing
 └── scripts/
     ├── mine-genesis.py       # Genesis block miner
     └── configure-network.py  # Apply network.conf to source files
@@ -101,12 +119,34 @@ Add VoxelChain to MetaMask:
 - Chain ID: `784201`
 - Currency Symbol: `VXL`
 
-### 4. Open the Game Client
+### 4. Run the Game Client (Development)
 
-Navigate to `http://localhost:8545/client/` for the browser-based voxel world:
-- WASD to move
-- 1-9 to select block types
-- Connect wallet to place blocks on-chain
+```bash
+cd client
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` for the 3D voxel game client:
+- **WASD** - Move (Shift = sprint, Space = jump)
+- **Mouse** - Look around (click to capture pointer)
+- **Left click** - Break block
+- **Right click** - Place block
+- **1-9** - Select block type from hotbar
+- **E** - Toggle inventory
+- **T** - Open chat
+- **M** - Toggle minimap
+- **F** - Toggle fly mode
+- **Connect Wallet** - Links MetaMask for on-chain actions
+
+### 5. Production Client
+
+Build for production:
+```bash
+cd client
+npm run build
+```
+Serve the `client/dist/` folder or access via `http://localhost:8545/client/`
 
 ## Network Configuration
 
@@ -152,6 +192,29 @@ Custom methods for game world interaction:
 | `voxel_getBlock` | `[x, y, z]` | Get block at position |
 | `voxel_getChunkMerkleRoot` | `[cx, cy, cz]` | Get chunk Merkle root |
 | `voxel_getPendingChanges` | none | Get pending world changes |
+
+### Game System Methods
+
+Server-side game logic accessible via JSON-RPC:
+
+| Method | Params | Description |
+|--------|--------|-------------|
+| `game_getServerInfo` | none | Server status, online players, economy stats |
+| `game_joinSession` | `[address, displayName]` | Join multiplayer session |
+| `game_leaveSession` | `[address]` | Leave multiplayer session |
+| `game_getOnlinePlayers` | none | List online players with positions |
+| `game_updatePosition` | `[address, x, y, z]` | Update player position |
+| `game_sendChat` | `[address, message]` | Send chat message |
+| `game_getRecipes` | none | List all crafting recipes |
+| `game_craft` | `[address, recipeId]` | Craft an item |
+| `game_getInventory` | `[address]` | Get player inventory |
+| `game_getEconomyStats` | none | Economy totals and multipliers |
+| `game_getLeaderboard` | `[limit]` | Top players by VXL balance |
+| `game_createListing` | `[seller, itemType, count, price]` | List item on marketplace |
+| `game_buyListing` | `[buyer, listingId]` | Buy marketplace listing |
+| `game_getListings` | none | Active marketplace listings |
+| `game_generateTerrain` | `[cx, cy, cz, seed?]` | Generate terrain for chunk |
+| `game_getTerrainInfo` | `[cx, cz]` | Get biome/height info |
 
 ## Smart Contracts
 
