@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxelChain World</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="loading">
+        <h2>VoxelChain</h2>
+        <p>Loading the on-chain world...</p>
+        <div class="progress-bar"><div class="progress-fill" id="load-progress"></div></div>
+        <p class="load-status" id="load-status">Initializing...</p>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+    <div id="crosshair"></div>
+
+    <div id="hud">
+        <div class="hud-left">
+            <span class="hud-badge purple">Block: <span id="hud-vblock">-</span></span>
+            <span class="hud-badge green">Real: <span id="hud-rblock">-</span></span>
+            <span class="hud-badge" id="hud-fps">FPS: -</span>
+            <span id="hud-pos">X: 0 Y: 0 Z: 0</span>
+        </div>
+        <div class="hud-right">
+            <span class="wallet-addr" id="wallet-addr"></span>
+            <button id="wallet-btn">Connect Wallet</button>
+        </div>
+    </div>
+
+    <div id="hotbar"></div>
+
+    <div id="inventory-panel" class="panel hidden">
+        <div class="panel-header">
+            <span>Inventory</span>
+            <button class="panel-close" id="inventory-close">&times;</button>
+        </div>
+        <div class="panel-body" id="inventory-grid"></div>
+    </div>
+
+    <div id="chat">
+        <div id="chat-messages"></div>
+        <input type="text" id="chat-input" placeholder="Press T to chat..." class="hidden">
+    </div>
+
+    <div id="minimap">
+        <canvas id="minimap-canvas" width="150" height="150"></canvas>
+    </div>
+
+    <div id="block-info" class="hidden">
+        <span id="block-info-name"></span>
+        <span id="block-info-pos"></span>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>

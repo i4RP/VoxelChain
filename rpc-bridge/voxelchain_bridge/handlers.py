@@ -27,6 +27,9 @@ from .eth_tx_decoder import decode_raw_transaction
 from .node_client import RPCError, VoxelChainNodeClient
 from .virtual_blocks import VirtualBlockEngine
 from .voxel_world import VoxelWorld, BLOCK_TYPES
+from .crafting import CraftingSystem
+from .economy import EconomySystem
+from .multiplayer import MultiplayerManager
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,11 @@ class EthRPCHandlers:
         self._nonces: dict[str, int] = {}
         self._pending_txs: dict[str, dict] = {}
         self._last_nonce_query_addr: str = ""
+
+        # Game systems
+        self.crafting = CraftingSystem()
+        self.economy = EconomySystem()
+        self.multiplayer = MultiplayerManager()
 
         self._handlers = {
             # Web3 methods
@@ -92,6 +100,22 @@ class EthRPCHandlers:
             "voxel_getBlock": self.voxel_get_block,
             "voxel_getChunkMerkleRoot": self.voxel_get_chunk_merkle_root,
             "voxel_getPendingChanges": self.voxel_get_pending_changes,
+            # === Game System Methods ===
+            "game_getRecipes": self.game_get_recipes,
+            "game_craft": self.game_craft,
+            "game_getInventory": self.game_get_inventory,
+            "game_getEconomyStats": self.game_get_economy_stats,
+            "game_getLeaderboard": self.game_get_leaderboard,
+            "game_createListing": self.game_create_listing,
+            "game_buyListing": self.game_buy_listing,
+            "game_getListings": self.game_get_listings,
+            "game_playerJoin": self.game_player_join,
+            "game_playerLeave": self.game_player_leave,
+            "game_updatePosition": self.game_update_position,
+            "game_getOnlinePlayers": self.game_get_online_players,
+            "game_chat": self.game_chat,
+            "game_getEvents": self.game_get_events,
+            "game_getServerInfo": self.game_get_server_info,
         }
 
     def get_handler(self, method: str):
@@ -433,6 +457,109 @@ class EthRPCHandlers:
         if not self.world:
             raise RPCError(-32000, "Voxel world not initialized")
         return self.world.get_pending_changes()
+
+    # === Game System Methods ===
+
+    def game_get_recipes(self, params: list) -> list:
+        category = params[0] if params else None
+        if category:
+            return self.crafting.get_recipes_by_category(category)
+        return self.crafting.get_all_recipes()
+
+    def game_craft(self, params: list) -> dict:
+        if len(params) < 2:
+            raise RPCError(-32602, "Expected [player_address, recipe_id]")
+        player_addr = params[0]
+        recipe_id = params[1]
+        player = self.economy.get_player(player_addr)
+        result = self.crafting.craft(recipe_id, player.items)
+        if result is None:
+            raise RPCError(-32000, "Cannot craft: missing ingredients or invalid recipe")
+        result_type, result_count, new_inventory = result
+        player.items = new_inventory
+        return {
+            "success": True,
+            "resultType": result_type,
+            "resultCount": result_count,
+            "inventory": player.to_dict()["items"],
+        }
+
+    def game_get_inventory(self, params: list) -> dict:
+        if not params:
+            raise RPCError(-32602, "Expected [player_address]")
+        player = self.economy.get_player(params[0])
+        return player.to_dict()
+
+    def game_get_economy_stats(self, params: list) -> dict:
+        return self.economy.get_economy_stats()
+
+    def game_get_leaderboard(self, params: list) -> list:
+        limit = int(params[0]) if params else 10
+        return self.economy.get_leaderboard(limit)
+
+    def game_create_listing(self, params: list) -> dict:
+        if len(params) < 4:
+            raise RPCError(-32602, "Expected [seller, item_type, item_count, price_vxl]")
+        seller, item_type, item_count, price = params[0], int(params[1]), int(params[2]), float(params[3])
+        result = self.economy.create_listing(seller, item_type, item_count, price)
+        if result is None:
+            raise RPCError(-32000, "Cannot create listing: insufficient items")
+        return result
+
+    def game_buy_listing(self, params: list) -> dict:
+        if len(params) < 2:
+            raise RPCError(-32602, "Expected [buyer_address, listing_id]")
+        result = self.economy.buy_listing(params[0], params[1])
+        if result is None:
+            raise RPCError(-32000, "Cannot buy: listing not found or insufficient VXL")
+        return result
+
+    def game_get_listings(self, params: list) -> list:
+        listing_type = params[0] if params else "all"
+        return self.economy.get_active_listings(listing_type)
+
+    def game_player_join(self, params: list) -> dict:
+        if not params:
+            raise RPCError(-32602, "Expected [player_address, display_name?, position?]")
+        address = params[0]
+        display_name = params[1] if len(params) > 1 else ""
+        position = params[2] if len(params) > 2 else None
+        return self.multiplayer.player_join(address, display_name, position)
+
+    def game_player_leave(self, params: list) -> dict:
+        if not params:
+            raise RPCError(-32602, "Expected [player_address]")
+        return self.multiplayer.player_leave(params[0])
+
+    def game_update_position(self, params: list) -> bool:
+        if len(params) < 2:
+            raise RPCError(-32602, "Expected [player_address, position]")
+        look = params[2] if len(params) > 2 else None
+        return self.multiplayer.update_position(params[0], params[1], look)
+
+    def game_get_online_players(self, params: list) -> list:
+        return self.multiplayer.get_online_players()
+
+    def game_chat(self, params: list) -> dict:
+        if len(params) < 2:
+            raise RPCError(-32602, "Expected [sender_address, message]")
+        return self.multiplayer.broadcast_chat(params[0], params[1])
+
+    def game_get_events(self, params: list) -> list:
+        since = float(params[0]) if params else 0
+        limit = int(params[1]) if len(params) > 1 else 50
+        return self.multiplayer.get_recent_events(since, limit)
+
+    def game_get_server_info(self, params: list) -> dict:
+        mp_info = self.multiplayer.get_server_info()
+        economy_info = self.economy.get_economy_stats()
+        world_info = self.world.get_world_info() if self.world else {}
+        return {
+            **mp_info,
+            **economy_info,
+            **world_info,
+            "version": "0.2.0",
+        }
 
     # === Internal ===
 
