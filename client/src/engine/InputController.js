@@ -1,6 +1,7 @@
 /**
  * First-person input controller for VoxelChain.
  * Handles keyboard, mouse, and pointer lock for FPS movement.
+ * Supports AI mode for programmatic control without pointer lock.
  */
 
 import * as THREE from "three";
@@ -29,12 +30,85 @@ export class InputController {
     this.onGround = false;
     this.selectedSlot = 0;
 
+    // AI mode: bypasses pointer lock, allows programmatic control
+    this.aiMode = false;
+    this._aiMoveTarget = null; // {x,y,z} target for moveTo
+    this._aiMoveCallback = null; // resolve when arrived
+    this._aiMoveSpeed = FLY_SPEED;
+
     // Callbacks
     this.onBlockPlace = null;
     this.onBlockBreak = null;
     this.onSlotChange = null;
 
+    // Check URL param for AI mode
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("ai") === "true") {
+      this.enableAIMode();
+    }
+
     this._setupEventListeners();
+  }
+
+  /** Enable AI mode - bypasses pointer lock requirement */
+  enableAIMode() {
+    this.aiMode = true;
+    this.isLocked = true; // Simulate locked state
+    this.flyMode = true;
+    console.log("[VoxelChain] AI mode enabled");
+  }
+
+  /** Disable AI mode - restores normal pointer lock behavior */
+  disableAIMode() {
+    this.aiMode = false;
+    this.isLocked = document.pointerLockElement === this.canvas;
+    this._aiMoveTarget = null;
+    this._aiMoveCallback = null;
+    console.log("[VoxelChain] AI mode disabled");
+  }
+
+  /** Set camera look direction by euler angles (radians) */
+  setLookEuler(yaw, pitch) {
+    this.euler.y = yaw;
+    this.euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
+    this.camera.quaternion.setFromEuler(this.euler);
+  }
+
+  /** Look at a world position */
+  lookAtPosition(x, y, z) {
+    const eyePos = this.getEyePosition();
+    const dx = x - eyePos.x;
+    const dy = y - eyePos.y;
+    const dz = z - eyePos.z;
+    const yaw = Math.atan2(-dx, -dz);
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const pitch = Math.atan2(dy, dist);
+    this.setLookEuler(yaw, pitch);
+  }
+
+  /** Teleport to exact position */
+  teleport(x, y, z) {
+    this.position.set(x, y, z);
+    this.velocity.set(0, 0, 0);
+    this.camera.position.copy(this.position);
+    this.camera.position.y += 1.6;
+  }
+
+  /** Start moving toward a target position (AI mode) */
+  moveToward(x, y, z) {
+    return new Promise((resolve) => {
+      this._aiMoveTarget = new THREE.Vector3(x, y, z);
+      this._aiMoveCallback = resolve;
+    });
+  }
+
+  /** Cancel current AI move */
+  cancelMove() {
+    if (this._aiMoveCallback) {
+      this._aiMoveCallback({ arrived: false, reason: "cancelled" });
+    }
+    this._aiMoveTarget = null;
+    this._aiMoveCallback = null;
   }
 
   _setupEventListeners() {
@@ -148,7 +222,31 @@ export class InputController {
   }
 
   update(dt) {
-    if (!this.isLocked) return;
+    if (!this.isLocked && !this.aiMode) return;
+
+    // AI move-toward logic
+    if (this.aiMode && this._aiMoveTarget) {
+      const target = this._aiMoveTarget;
+      const dx = target.x - this.position.x;
+      const dy = target.y - this.position.y;
+      const dz = target.z - this.position.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      if (dist < 0.5) {
+        this.position.copy(target);
+        const cb = this._aiMoveCallback;
+        this._aiMoveTarget = null;
+        this._aiMoveCallback = null;
+        if (cb) cb({ arrived: true, position: { x: target.x, y: target.y, z: target.z } });
+      } else {
+        const moveDir = new THREE.Vector3(dx, dy, dz).normalize();
+        const step = Math.min(this._aiMoveSpeed * dt, dist);
+        this.position.add(moveDir.multiplyScalar(step));
+      }
+      this.camera.position.copy(this.position);
+      this.camera.position.y += 1.6;
+      return;
+    }
 
     const speed = this.keys["ShiftLeft"] ? SPRINT_SPEED : MOVE_SPEED;
 
