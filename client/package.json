@@ -1,0 +1,17 @@
+{
+  "name": "voxelchain-client",
+  "version": "0.2.0",
+  "description": "VoxelChain browser-based voxel game client with Three.js",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.162.0"
+  },
+  "devDependencies": {
+    "vite": "^5.1.0"
+  }
+}

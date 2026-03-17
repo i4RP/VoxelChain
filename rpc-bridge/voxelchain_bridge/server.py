@@ -49,12 +49,13 @@ class VoxelChainBridgeServer:
         self._setup_routes()
 
     def _setup_routes(self):
-        self.app.router.add_post("/", self.handle_rpc)
         self.app.router.add_post("/rpc", self.handle_rpc)
         self.app.router.add_post("/faucet", self.handle_faucet)
         self.app.router.add_get("/ws", self.handle_websocket)
         self.app.router.add_get("/health", self.handle_health)
-        self.app.router.add_get("/", self.handle_info)
+        self.app.router.add_get("/api/info", self.handle_info)
+        # Serve static files for explorer and client
+        self.app.router.add_post("/", self.handle_rpc)
 
     async def handle_faucet(self, request: web.Request) -> web.Response:
         try:
@@ -120,14 +121,97 @@ class VoxelChainBridgeServer:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     data = json.loads(msg.data)
-                    if data.get("type") == "ping":
+                    msg_type = data.get("type", "")
+                    if msg_type == "ping":
                         await ws.send_json({"type": "pong"})
-                    elif data.get("type") == "getChunk":
+                    elif msg_type == "getChunk":
                         cx = data.get("cx", 0)
                         cy = data.get("cy", 0)
                         cz = data.get("cz", 0)
                         chunk_data = self.voxel_world.get_chunk_data(cx, cy, cz)
                         await ws.send_json({"type": "chunkData", **chunk_data})
+                    elif msg_type == "getChunkBatch":
+                        # Batch chunk request for efficient streaming
+                        chunks = data.get("chunks", [])
+                        for c in chunks[:16]:  # Max 16 chunks per batch
+                            cx, cy, cz = c.get("x", 0), c.get("y", 0), c.get("z", 0)
+                            chunk_data = self.voxel_world.get_chunk_data(cx, cy, cz)
+                            await ws.send_json({"type": "chunkData", **chunk_data})
+                    elif msg_type == "placeBlock":
+                        # Direct block placement via WebSocket
+                        try:
+                            x, y, z = data.get("x", 0), data.get("y", 0), data.get("z", 0)
+                            block_type = data.get("blockType", 1)
+                            player = data.get("player", "")
+                            change = self.voxel_world.place_block(x, y, z, block_type, player)
+                            await ws.send_json({"type": "blockPlaced", **change})
+                            # Broadcast to all clients
+                            await self._ws_broadcast({"type": "worldChange", **change})
+                        except ValueError as e:
+                            await ws.send_json({"type": "error", "message": str(e)})
+                    elif msg_type == "breakBlock":
+                        try:
+                            x, y, z = data.get("x", 0), data.get("y", 0), data.get("z", 0)
+                            player = data.get("player", "")
+                            change = self.voxel_world.break_block(x, y, z, player)
+                            await ws.send_json({"type": "blockBroken", **change})
+                            await self._ws_broadcast({"type": "worldChange", **change})
+                        except ValueError as e:
+                            await ws.send_json({"type": "error", "message": str(e)})
+                    elif msg_type == "subscribe":
+                        # Subscribe to chunk updates in a region
+                        region = data.get("region", {})
+                        cx, cy, cz = region.get("cx", 0), region.get("cy", 0), region.get("cz", 0)
+                        radius = region.get("radius", 2)
+                        player_addr = data.get("player", "")
+                        if player_addr:
+                            for dx in range(-radius, radius + 1):
+                                for dz in range(-radius, radius + 1):
+                                    self.handlers.multiplayer.subscribe_chunk(
+                                        player_addr, cx + dx, cy, cz + dz
+                                    )
+                            await ws.send_json({"type": "subscribed", "region": region})
+                    elif msg_type == "playerJoin":
+                        address = data.get("address", "")
+                        name = data.get("displayName", "")
+                        pos = data.get("position")
+                        result = self.handlers.multiplayer.player_join(address, name, pos)
+                        await ws.send_json({"type": "joinResult", **result})
+                        if result.get("success"):
+                            await self._ws_broadcast({
+                                "type": "playerJoined",
+                                "player": result.get("session", {}),
+                            })
+                    elif msg_type == "playerLeave":
+                        address = data.get("address", "")
+                        result = self.handlers.multiplayer.player_leave(address)
+                        await self._ws_broadcast({
+                            "type": "playerLeft",
+                            "address": address,
+                        })
+                    elif msg_type == "updatePosition":
+                        address = data.get("address", "")
+                        position = data.get("position", {})
+                        look = data.get("lookDirection")
+                        self.handlers.multiplayer.update_position(address, position, look)
+                        await self._ws_broadcast({
+                            "type": "playerMoved",
+                            "address": address,
+                            "position": position,
+                        })
+                    elif msg_type == "chat":
+                        sender = data.get("sender", "")
+                        message = data.get("message", "")
+                        result = self.handlers.multiplayer.broadcast_chat(sender, message)
+                        await self._ws_broadcast(result)
+                    elif msg_type == "craft":
+                        player_addr = data.get("player", "")
+                        recipe_id = data.get("recipeId", "")
+                        try:
+                            result = self.handlers.game_craft([player_addr, recipe_id])
+                            await ws.send_json({"type": "craftResult", **result})
+                        except RPCError as e:
+                            await ws.send_json({"type": "error", "message": e.message})
                 elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
                     break
         except Exception as e:
@@ -175,12 +259,15 @@ class VoxelChainBridgeServer:
     async def handle_info(self, request: web.Request) -> web.Response:
         return web.json_response({
             "service": "VoxelChain RPC Bridge",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "chainId": self.config.chain_id_hex,
             "network": self.config.network,
             "currency": "VXL",
             "supportedMethods": self.handlers.list_methods(),
             "voxelMethods": [m for m in self.handlers.list_methods() if m.startswith("voxel_")],
+            "gameMethods": [m for m in self.handlers.list_methods() if m.startswith("game_")],
+            "wsEndpoint": "/ws",
+            "connectedClients": len(self._ws_clients),
         })
 
     async def handle_rpc(self, request: web.Request) -> web.Response:
