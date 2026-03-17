@@ -9,6 +9,10 @@ import { InputController } from "./engine/InputController.js";
 import { BlockchainSync } from "./engine/BlockchainSync.js";
 import { UIManager } from "./engine/UIManager.js";
 import { registry } from "./engine/BlockRegistry.js";
+import { GameCommandAPI } from "./engine/GameCommandAPI.js";
+import { Pathfinder } from "./engine/Pathfinder.js";
+import { AIObserver } from "./engine/AIObserver.js";
+import { AICommandServer } from "./engine/AICommandServer.js";
 
 class VoxelChainGame {
   constructor() {
@@ -19,6 +23,12 @@ class VoxelChainGame {
     this.input = null;
     this.blockchain = null;
     this.ui = null;
+
+    // AI agent support
+    this.api = null;
+    this.pathfinder = null;
+    this.observer = null;
+    this.commandServer = null;
 
     this.clock = new THREE.Clock();
     this.frameCount = 0;
@@ -78,14 +88,71 @@ class VoxelChainGame {
     // Window resize
     window.addEventListener("resize", () => this._onResize());
 
+    // AI Agent Support
+    this.ui.setLoadProgress(85, "Setting up AI systems...");
+    this._setupAISupport();
+
     // Start
     this.ui.setLoadProgress(100, "Ready!");
     await new Promise((r) => setTimeout(r, 400));
     this.ui.hideLoading();
-    this.ui.addChatMessage("Welcome to VoxelChain! Click to enter, WASD to move, F to toggle fly.", "#7c3aed");
-    this.ui.addChatMessage("Left-click to break, right-click to place. 1-9 for blocks.", "#666");
+
+    if (this.input.aiMode) {
+      this.ui.addChatMessage("VoxelChain AI Mode active. Use game.api.help() for commands.", "#7c3aed");
+    } else {
+      this.ui.addChatMessage("Welcome to VoxelChain! Click to enter, WASD to move, F to toggle fly.", "#7c3aed");
+      this.ui.addChatMessage("Left-click to break, right-click to place. 1-9 for blocks.", "#666");
+    }
     this.running = true;
     this._animate();
+  }
+
+  _setupAISupport() {
+    // GameCommandAPI - programmatic interface
+    this.api = new GameCommandAPI(this);
+
+    // Pathfinder - A* navigation
+    this.pathfinder = new Pathfinder(this.world);
+
+    // AIObserver - structured state output
+    this.observer = new AIObserver(this);
+
+    // AICommandServer - external process communication
+    this.commandServer = new AICommandServer(this, this.api, this.observer);
+    this.commandServer.start();
+
+    // Extended API methods that require pathfinder
+    this.api.findPath = (sx, sy, sz, gx, gy, gz, options) => {
+      return this.pathfinder.findPath(sx, sy, sz, gx, gy, gz, options);
+    };
+
+    this.api.navigateTo = async (x, y, z, options = {}) => {
+      const pos = this.input.position;
+      const result = this.pathfinder.findPath(
+        Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z),
+        Math.floor(x), Math.floor(y), Math.floor(z),
+        { allowFly: this.input.flyMode, ...options }
+      );
+
+      if (!result.found) {
+        return { success: false, error: "No path found", iterations: result.iterations };
+      }
+
+      // Follow the path step by step
+      for (const step of result.path) {
+        const moveResult = await this.input.moveToward(step.x, step.y, step.z);
+        if (!moveResult.arrived) {
+          return { success: false, error: "Movement interrupted", reachedStep: step };
+        }
+      }
+
+      return { success: true, pathLength: result.path.length };
+    };
+
+    // Expose to global scope for console / Playwright access
+    window.game = this;
+
+    console.log("[VoxelChain] AI support initialized. Access via window.game.api");
   }
 
   _setupRenderer() {
