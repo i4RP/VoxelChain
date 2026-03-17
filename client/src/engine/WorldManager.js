@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import { Chunk, CHUNK_SIZE } from "./Chunk.js";
 import { TerrainGenerator } from "./TerrainGenerator.js";
+import { registry } from "./BlockRegistry.js";
 
 const VIEW_DISTANCE = 4; // chunks
 const UNLOAD_DISTANCE = 6; // chunks
@@ -17,6 +18,97 @@ export class WorldManager {
     this.terrain = new TerrainGenerator();
     this._loadQueue = [];
     this._buildQueue = [];
+    this._meshWorker = null;
+    this._pendingWorkerBuilds = new Set();
+    this._initMeshWorker();
+  }
+
+  /** Initialize mesh generation WebWorker */
+  _initMeshWorker() {
+    try {
+      this._meshWorker = new Worker(
+        new URL("./MeshWorker.js", import.meta.url),
+        { type: "module" }
+      );
+      this._meshWorker.onmessage = (e) => this._onWorkerMessage(e);
+      this._meshWorker.onerror = (err) => {
+        console.warn("[WorldManager] MeshWorker error, falling back to main thread:", err.message);
+        this._meshWorker = null;
+      };
+
+      // Pre-serialize block definitions for the worker
+      this._blockDefs = {};
+      for (let i = 0; i <= 20; i++) {
+        const def = registry.get(i);
+        this._blockDefs[i] = {
+          transparent: def.transparent,
+          color: def.color,
+          topColor: def.topColor || def.color,
+          sideColor: def.sideColor || def.color,
+          bottomColor: def.bottomColor || def.sideColor || def.color,
+        };
+      }
+    } catch (err) {
+      console.warn("[WorldManager] WebWorker not available:", err.message);
+      this._meshWorker = null;
+    }
+  }
+
+  /** Handle mesh data from worker */
+  _onWorkerMessage(e) {
+    const { type, chunkKey, opaque, transparent } = e.data;
+    if (type !== "meshBuilt") return;
+
+    this._pendingWorkerBuilds.delete(chunkKey);
+    const chunk = this.chunks.get(chunkKey);
+    if (!chunk) return;
+
+    // Dispose old meshes
+    if (chunk.mesh) {
+      chunk.mesh.geometry.dispose();
+      if (chunk.mesh.parent) chunk.mesh.parent.remove(chunk.mesh);
+      chunk.mesh = null;
+    }
+    if (chunk.transparentMesh) {
+      chunk.transparentMesh.geometry.dispose();
+      if (chunk.transparentMesh.parent) chunk.transparentMesh.parent.remove(chunk.transparentMesh);
+      chunk.transparentMesh = null;
+    }
+
+    const worldX = chunk.cx * CHUNK_SIZE;
+    const worldY = chunk.cy * CHUNK_SIZE;
+    const worldZ = chunk.cz * CHUNK_SIZE;
+
+    if (opaque) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(opaque.positions, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(opaque.normals, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(opaque.colors, 3));
+      geo.setIndex(new THREE.BufferAttribute(opaque.indices, 1));
+      const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+      chunk.mesh = new THREE.Mesh(geo, mat);
+      chunk.mesh.position.set(worldX, worldY, worldZ);
+      chunk.mesh.castShadow = true;
+      chunk.mesh.receiveShadow = true;
+      this.scene.add(chunk.mesh);
+    }
+
+    if (transparent) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(transparent.positions, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(transparent.normals, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(transparent.colors, 3));
+      geo.setIndex(new THREE.BufferAttribute(transparent.indices, 1));
+      const mat = new THREE.MeshLambertMaterial({
+        vertexColors: true, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+      });
+      chunk.transparentMesh = new THREE.Mesh(geo, mat);
+      chunk.transparentMesh.position.set(worldX, worldY, worldZ);
+      chunk.transparentMesh.renderOrder = 1;
+      this.scene.add(chunk.transparentMesh);
+    }
+
+    chunk.dirty = false;
   }
 
   /** Get chunk key string */
@@ -144,6 +236,39 @@ export class WorldManager {
   }
 
   _buildChunkMesh(chunk) {
+    const key = this._key(chunk.cx, chunk.cy, chunk.cz);
+
+    // Try WebWorker path for offloaded mesh generation
+    if (this._meshWorker && !this._pendingWorkerBuilds.has(key)) {
+      this._pendingWorkerBuilds.add(key);
+
+      // Collect neighbor blocks at chunk boundaries for the worker
+      const neighborBlocks = {};
+      const worldX = chunk.cx * CHUNK_SIZE;
+      const worldY = chunk.cy * CHUNK_SIZE;
+      const worldZ = chunk.cz * CHUNK_SIZE;
+      for (let z = -1; z <= CHUNK_SIZE; z++) {
+        for (let y = -1; y <= CHUNK_SIZE; y++) {
+          for (let x = -1; x <= CHUNK_SIZE; x++) {
+            if (x >= 0 && x < CHUNK_SIZE && y >= 0 && y < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE) continue;
+            const bt = this.getBlock(worldX + x, worldY + y, worldZ + z);
+            if (bt !== 0) neighborBlocks[`${x},${y},${z}`] = bt;
+          }
+        }
+      }
+
+      const blocksBuffer = chunk.blocks.buffer.slice(0);
+      this._meshWorker.postMessage({
+        type: "buildMesh",
+        chunkKey: key,
+        blocks: blocksBuffer,
+        neighborBlocks,
+        blockDefs: this._blockDefs,
+      }, [blocksBuffer]);
+      return;
+    }
+
+    // Fallback: build on main thread
     const getNeighborBlock = (wx, wy, wz) => this.getBlock(wx, wy, wz);
     chunk.buildMesh(getNeighborBlock);
 

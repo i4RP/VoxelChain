@@ -221,6 +221,34 @@ export class UIManager {
     ctx.fillRect(centerX - 2, centerY - 2, 4, 4);
   }
 
+  /** Set connection status indicator */
+  setConnectionStatus(connected) {
+    const indicator = document.getElementById("connection-status");
+    if (indicator) {
+      indicator.className = connected ? "conn-status connected" : "conn-status disconnected";
+      indicator.title = connected ? "Connected to VoxelChain node" : "Disconnected";
+    }
+  }
+
+  /** Set up chat input handler with a send callback */
+  setupChatInput(onSendMessage) {
+    const chatInput = document.getElementById("chat-input");
+    if (!chatInput) return;
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.code === "Enter" && chatInput.value.trim()) {
+        const message = chatInput.value.trim();
+        chatInput.value = "";
+        chatInput.classList.add("hidden");
+        if (onSendMessage) onSendMessage(message);
+      }
+      if (e.code === "Escape") {
+        chatInput.value = "";
+        chatInput.classList.add("hidden");
+      }
+      e.stopPropagation();
+    });
+  }
+
   /** Set loading progress */
   setLoadProgress(percent, status = "") {
     const fill = document.getElementById("load-progress");

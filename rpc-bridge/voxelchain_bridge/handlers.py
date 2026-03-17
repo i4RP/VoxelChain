@@ -39,11 +39,13 @@ class EthRPCHandlers:
 
     def __init__(self, config: BridgeConfig, node_client: VoxelChainNodeClient,
                  vblock_engine: Optional[VirtualBlockEngine] = None,
-                 voxel_world: Optional[VoxelWorld] = None):
+                 voxel_world: Optional[VoxelWorld] = None,
+                 persistence=None):
         self.config = config
         self.node = node_client
         self.vblocks = vblock_engine
         self.world = voxel_world
+        self._persistence = persistence
         self._imported_addresses: set = set()
         self._nonces: dict[str, int] = {}
         self._pending_txs: dict[str, dict] = {}
@@ -51,7 +53,7 @@ class EthRPCHandlers:
 
         # Game systems
         self.crafting = CraftingSystem()
-        self.economy = EconomySystem()
+        self.economy = EconomySystem(persistence=persistence)
         self.multiplayer = MultiplayerManager()
 
         self._handlers = {
@@ -407,8 +409,17 @@ class EthRPCHandlers:
         block_type = int(params[3])
         player = params[4] if len(params) > 4 else ""
         try:
+            old_block = self.world.get_block(x, y, z)
             change = self.world.place_block(x, y, z, block_type, player)
             change["gasUsed"] = VOXEL_GAS["place_block"]
+            # Log block change and award economy rewards
+            if self._persistence:
+                self._persistence.log_block_change(
+                    x, y, z, old_block.block_type, block_type, player,
+                    change.get("merkleRoot", "")
+                )
+            if player:
+                self.economy.process_block_place(block_type, player)
             return change
         except ValueError as e:
             raise RPCError(-32000, str(e))
@@ -421,8 +432,17 @@ class EthRPCHandlers:
         x, y, z = int(params[0]), int(params[1]), int(params[2])
         player = params[3] if len(params) > 3 else ""
         try:
+            old_block = self.world.get_block(x, y, z)
             change = self.world.break_block(x, y, z, player)
             change["gasUsed"] = VOXEL_GAS["break_block"]
+            # Log block change and award economy rewards
+            if self._persistence:
+                self._persistence.log_block_change(
+                    x, y, z, old_block.block_type, 0, player,
+                    change.get("merkleRoot", "")
+                )
+            if player:
+                self.economy.process_block_break(old_block.block_type, player)
             return change
         except ValueError as e:
             raise RPCError(-32000, str(e))

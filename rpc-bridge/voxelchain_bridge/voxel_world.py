@@ -180,11 +180,12 @@ class VoxelWorld:
     """
 
     def __init__(self, data_dir: str = "/tmp/voxelchain-world",
-                 chunk_size: int = 16):
+                 chunk_size: int = 16, persistence=None):
         self.data_dir = data_dir
         self.chunk_size = chunk_size
         self.chunks: Dict[Tuple[int, int, int], Chunk] = {}
         self._pending_changes: List[dict] = []
+        self._persistence = persistence
         os.makedirs(data_dir, exist_ok=True)
 
     def _chunk_key(self, x: int, y: int, z: int) -> Tuple[int, int, int]:
@@ -199,11 +200,12 @@ class VoxelWorld:
         """Get or create a chunk."""
         key = (cx, cy, cz)
         if key not in self.chunks:
-            # Try load from disk
+            # Try load from database first, then disk
             chunk = self._load_chunk(cx, cy, cz)
             if chunk is None:
                 chunk = Chunk(x=cx, y=cy, z=cz, size=self.chunk_size)
                 self._generate_terrain(chunk)
+                self._save_chunk(chunk)
             self.chunks[key] = chunk
         return self.chunks[key]
 
@@ -309,7 +311,18 @@ class VoxelWorld:
         # y > 0: leave as air
 
     def _save_chunk(self, chunk: Chunk):
-        """Save chunk to disk."""
+        """Save chunk to database (preferred) or disk (fallback)."""
+        if self._persistence:
+            try:
+                self._persistence.save_chunk(
+                    chunk.x, chunk.y, chunk.z,
+                    bytes(chunk.blocks),
+                    chunk.merkle_root, chunk.owner, chunk.tx_hash
+                )
+                return
+            except Exception as e:
+                logger.error("DB save failed, falling back to disk: %s", e)
+        # Fallback to disk
         path = os.path.join(
             self.data_dir,
             f"chunk_{chunk.x}_{chunk.y}_{chunk.z}.bin"
@@ -321,7 +334,20 @@ class VoxelWorld:
             logger.error("Failed to save chunk: %s", e)
 
     def _load_chunk(self, cx: int, cy: int, cz: int) -> Optional[Chunk]:
-        """Load chunk from disk."""
+        """Load chunk from database (preferred) or disk (fallback)."""
+        if self._persistence:
+            try:
+                result = self._persistence.load_chunk(cx, cy, cz)
+                if result:
+                    blocks_data, merkle_root, owner = result
+                    chunk = Chunk(x=cx, y=cy, z=cz, size=self.chunk_size,
+                                  blocks=bytearray(blocks_data))
+                    chunk.merkle_root = merkle_root or chunk.compute_merkle_root()
+                    chunk.owner = owner
+                    return chunk
+            except Exception as e:
+                logger.error("DB load failed, falling back to disk: %s", e)
+        # Fallback to disk
         path = os.path.join(self.data_dir, f"chunk_{cx}_{cy}_{cz}.bin")
         if not os.path.exists(path):
             return None

@@ -9,12 +9,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/rpc": "http://localhost:8545",
-      "/faucet": "http://localhost:8545",
+      "/rpc": "http://localhost:8546",
+      "/faucet": "http://localhost:8546",
       "/ws": {
-        target: "ws://localhost:8545",
+        target: "ws://localhost:8546",
         ws: true,
       },
+      "/health": "http://localhost:8546",
+      "/api": "http://localhost:8546",
     },
   },
 });
