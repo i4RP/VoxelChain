@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build
+*.o
+*.so
+*.dylib
+*.a
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Blockchain data
+/data/
+/voxelchain-data/
+*.dat
+*.log
+
+# Contracts
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+
+# Client build
+client/dist/
+client/build/
+
+# Temporary
+/tmp/
+*.tmp

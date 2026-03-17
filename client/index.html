@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxelChain World</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; font-family: system-ui, sans-serif; }
+        #game-canvas { width: 100vw; height: 100vh; display: block; }
+        #hud { position: fixed; top: 0; left: 0; right: 0; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; color: #fff; background: linear-gradient(180deg, rgba(0,0,0,0.6) 0%, transparent 100%); pointer-events: none; }
+        #hud > * { pointer-events: auto; }
+        .hud-left { display: flex; gap: 16px; align-items: center; font-size: 0.85rem; }
+        .hud-right { display: flex; gap: 12px; align-items: center; }
+        .hud-badge { background: rgba(124, 58, 237, 0.3); border: 1px solid rgba(124, 58, 237, 0.5); padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; }
+        .hud-badge.green { background: rgba(16, 185, 129, 0.3); border-color: rgba(16, 185, 129, 0.5); }
+        #crosshair { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; pointer-events: none; }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(255,255,255,0.7); }
+        #crosshair::before { width: 2px; height: 20px; left: 9px; }
+        #crosshair::after { width: 20px; height: 2px; top: 9px; }
+        #hotbar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; }
+        .hotbar-slot { width: 48px; height: 48px; background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color 0.15s; }
+        .hotbar-slot.active { border-color: #7c3aed; background: rgba(124, 58, 237, 0.2); }
+        .hotbar-slot .block-preview { width: 32px; height: 32px; border-radius: 4px; }
+        .hotbar-slot .slot-num { position: absolute; top: 2px; left: 4px; font-size: 0.65rem; color: rgba(255,255,255,0.5); }
+        #wallet-btn { background: #7c3aed; border: none; color: white; padding: 8px 16px; border-radius: 8px; font-size: 0.85rem; cursor: pointer; font-weight: 600; }
+        #wallet-btn:hover { background: #6d28d9; }
+        .wallet-addr { font-family: monospace; font-size: 0.8rem; color: #10b981; }
+        #chat { position: fixed; bottom: 80px; left: 20px; width: 350px; max-height: 200px; overflow-y: auto; font-size: 0.8rem; color: rgba(255,255,255,0.7); pointer-events: none; }
+        .chat-msg { padding: 2px 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); }
+        #loading { position: fixed; inset: 0; background: #0a0a0f; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+        #loading h2 { color: #7c3aed; font-size: 2rem; margin-bottom: 1rem; }
+        #loading p { color: #666; font-size: 0.9rem; }
+        .progress-bar { width: 300px; height: 4px; background: #1e1e2e; border-radius: 2px; margin-top: 1rem; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #10b981); width: 0%; transition: width 0.3s; border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <h2>VoxelChain</h2>
+        <p>Connecting to the on-chain world...</p>
+        <div class="progress-bar"><div class="progress-fill" id="load-progress"></div></div>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+    <div id="crosshair"></div>
+
+    <div id="hud">
+        <div class="hud-left">
+            <span class="hud-badge">Block: <span id="hud-vblock">-</span></span>
+            <span class="hud-badge green">Real: <span id="hud-rblock">-</span></span>
+            <span id="hud-pos" style="font-family:monospace;font-size:0.8rem">X: 0 Y: 0 Z: 0</span>
+        </div>
+        <div class="hud-right">
+            <span class="wallet-addr" id="wallet-addr"></span>
+            <button id="wallet-btn" onclick="connectWallet()">Connect Wallet</button>
+        </div>
+    </div>
+
+    <div id="hotbar"></div>
+    <div id="chat"></div>
+
+    <script>
+    // === Configuration ===
+    const RPC_URL = window.location.origin || 'http://localhost:8545';
+    const CHUNK_SIZE = 16;
+    const BLOCK_COLORS = {
+        0: null, // air
+        1: '#808080', 2: '#8B4513', 3: '#228B22', 4: '#F4A460',
+        5: '#4169E1', 6: '#8B6914', 7: '#006400', 8: '#B22222',
+        9: '#87CEEB', 10: '#A0522D', 11: '#FFD700', 12: '#00CED1',
+        13: '#2F4F4F', 14: '#696969', 15: '#DEB887', 16: '#FFFAFA',
+        17: '#B0E0E6', 18: '#FF4500', 19: '#1C1C1C', 20: '#BDB76B',
+    };
+    const BLOCK_NAMES = {
+        1: 'Stone', 2: 'Dirt', 3: 'Grass', 4: 'Sand', 5: 'Water',
+        6: 'Wood', 7: 'Leaves', 8: 'Brick', 9: 'Glass', 10: 'Iron Ore',
+        11: 'Gold Ore', 12: 'Diamond Ore', 13: 'Bedrock', 14: 'Cobblestone',
+        15: 'Planks', 16: 'Snow', 17: 'Ice', 18: 'Lava', 19: 'Obsidian', 20: 'Clay',
+    };
+
+    // === Game State ===
+    let canvas, ctx;
+    let playerPos = { x: 8, y: 20, z: 8 };
+    let playerRot = { yaw: 0, pitch: 0 };
+    let selectedSlot = 0;
+    let hotbarBlocks = [3, 1, 2, 6, 8, 15, 4, 9, 14];
+    let walletAddress = null;
+    let wsConnection = null;
+
+    // === Initialization ===
+    async function init() {
+        canvas = document.getElementById('game-canvas');
+        ctx = canvas.getContext('2d');
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Build hotbar
+        buildHotbar();
+
+        // Keyboard input
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('wheel', onWheel);
+
+        // Simulate loading
+        const progress = document.getElementById('load-progress');
+        for (let i = 0; i <= 100; i += 10) {
+            progress.style.width = i + '%';
+            await new Promise(r => setTimeout(r, 100));
+        }
+
+        document.getElementById('loading').style.display = 'none';
+
+        // Connect WebSocket
+        connectWS();
+
+        // Start render loop
+        requestAnimationFrame(gameLoop);
+
+        addChatMessage('System', 'Welcome to VoxelChain! Press WASD to move, 1-9 to select blocks.');
+        addChatMessage('System', 'Connect your wallet to place blocks on-chain.');
+    }
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+
+    // === WebSocket ===
+    function connectWS() {
+        try {
+            const wsUrl = `ws://${window.location.host}/ws`;
+            wsConnection = new WebSocket(wsUrl);
+            wsConnection.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                if (data.type === 'init' || data.type === 'newBlock') {
+                    document.getElementById('hud-vblock').textContent =
+                        (data.virtualBlock || 0).toLocaleString();
+                    document.getElementById('hud-rblock').textContent =
+                        (data.realBlock || 0).toLocaleString();
+                }
+            };
+            wsConnection.onclose = () => setTimeout(connectWS, 3000);
+        } catch(e) { /* retry */ }
+    }
+
+    // === Hotbar ===
+    function buildHotbar() {
+        const el = document.getElementById('hotbar');
+        el.innerHTML = hotbarBlocks.map((bt, i) => `
+            <div class="hotbar-slot ${i === selectedSlot ? 'active' : ''}"
+                 onclick="selectSlot(${i})" style="position:relative">
+                <span class="slot-num">${i + 1}</span>
+                <div class="block-preview" style="background:${BLOCK_COLORS[bt] || '#333'}"
+                     title="${BLOCK_NAMES[bt] || 'Unknown'}"></div>
+            </div>
+        `).join('');
+    }
+
+    function selectSlot(idx) {
+        selectedSlot = idx;
+        buildHotbar();
+    }
+
+    // === Input ===
+    function onKeyDown(e) {
+        const speed = 1;
+        const rad = playerRot.yaw * Math.PI / 180;
+
+        switch(e.key.toLowerCase()) {
+            case 'w': playerPos.z -= speed; break;
+            case 's': playerPos.z += speed; break;
+            case 'a': playerPos.x -= speed; break;
+            case 'd': playerPos.x += speed; break;
+            case ' ': playerPos.y += speed; break;
+            case 'shift': playerPos.y -= speed; break;
+        }
+
+        if (e.key >= '1' && e.key <= '9') {
+            selectSlot(parseInt(e.key) - 1);
+        }
+
+        document.getElementById('hud-pos').textContent =
+            `X: ${playerPos.x} Y: ${playerPos.y} Z: ${playerPos.z}`;
+    }
+
+    function onWheel(e) {
+        if (e.deltaY > 0) {
+            selectedSlot = (selectedSlot + 1) % hotbarBlocks.length;
+        } else {
+            selectedSlot = (selectedSlot - 1 + hotbarBlocks.length) % hotbarBlocks.length;
+        }
+        buildHotbar();
+    }
+
+    // === Wallet ===
+    async function connectWallet() {
+        if (typeof window.ethereum !== 'undefined') {
+            try {
+                const accounts = await window.ethereum.request({
+                    method: 'eth_requestAccounts'
+                });
+                walletAddress = accounts[0];
+
+                // Switch to VoxelChain
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: '0xbf829' }], // 784201
+                    });
+                } catch(switchErr) {
+                    if (switchErr.code === 4902) {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: '0xbf829',
+                                chainName: 'VoxelChain Testnet',
+                                rpcUrls: [RPC_URL],
+                                nativeCurrency: { name: 'VoxelCoin', symbol: 'VXL', decimals: 18 },
+                            }],
+                        });
+                    }
+                }
+
+                const short = walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4);
+                document.getElementById('wallet-addr').textContent = short;
+                document.getElementById('wallet-btn').textContent = 'Connected';
+                addChatMessage('System', `Wallet connected: ${short}`);
+            } catch(err) {
+                addChatMessage('Error', 'Wallet connection failed: ' + err.message);
+            }
+        } else {
+            addChatMessage('System', 'MetaMask not detected. Install MetaMask to interact with VoxelChain.');
+        }
+    }
+
+    // === Chat ===
+    function addChatMessage(sender, text) {
+        const el = document.getElementById('chat');
+        const msg = document.createElement('div');
+        msg.className = 'chat-msg';
+        msg.innerHTML = `<strong style="color:${sender === 'System' ? '#7c3aed' : '#10b981'}">[${sender}]</strong> ${text}`;
+        el.appendChild(msg);
+        el.scrollTop = el.scrollHeight;
+        // Auto-fade old messages
+        setTimeout(() => { msg.style.opacity = '0.3'; }, 10000);
+    }
+
+    // === Rendering (Simple isometric) ===
+    function gameLoop() {
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function render() {
+        ctx.fillStyle = '#0a0a1a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Sky gradient
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.6);
+        skyGrad.addColorStop(0, '#0a0a2e');
+        skyGrad.addColorStop(1, '#1a1a3e');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height * 0.6);
+
+        // Stars
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        for (let i = 0; i < 60; i++) {
+            const sx = (i * 97 + i * i * 13) % canvas.width;
+            const sy = (i * 53 + i * i * 7) % (canvas.height * 0.5);
+            ctx.fillRect(sx, sy, 1, 1);
+        }
+
+        // Render isometric terrain around player
+        const SIZE = 8;
+        const ISO_X = SIZE;
+        const ISO_Y = SIZE * 0.5;
+        const OX = canvas.width / 2;
+        const OY = canvas.height / 2 + 60;
+        const VIEW_RANGE = 12;
+
+        for (let dz = VIEW_RANGE; dz >= -VIEW_RANGE; dz--) {
+            for (let dx = -VIEW_RANGE; dx <= VIEW_RANGE; dx++) {
+                const wx = Math.floor(playerPos.x) + dx;
+                const wz = Math.floor(playerPos.z) + dz;
+
+                // Simple terrain generation
+                const h = Math.floor(4 + Math.sin(wx * 0.3) * 2 + Math.cos(wz * 0.4) * 1.5);
+
+                for (let y = 0; y <= h; y++) {
+                    let color;
+                    if (y === 0) color = BLOCK_COLORS[13]; // bedrock
+                    else if (y < h - 1) color = BLOCK_COLORS[1]; // stone
+                    else if (y === h - 1) color = BLOCK_COLORS[2]; // dirt
+                    else color = BLOCK_COLORS[3]; // grass
+
+                    const rx = dx;
+                    const rz = dz;
+                    const ry = y - Math.floor(playerPos.y) + 5;
+
+                    const sx = OX + (rx - rz) * ISO_X;
+                    const sy = OY + (rx + rz) * ISO_Y - ry * SIZE * 1.2;
+
+                    // Top
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(sx, sy - SIZE * 0.6);
+                    ctx.lineTo(sx + ISO_X, sy - SIZE * 0.1);
+                    ctx.lineTo(sx, sy + SIZE * 0.4);
+                    ctx.lineTo(sx - ISO_X, sy - SIZE * 0.1);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Left
+                    ctx.fillStyle = shadeColor(color, -30);
+                    ctx.beginPath();
+                    ctx.moveTo(sx - ISO_X, sy - SIZE * 0.1);
+                    ctx.lineTo(sx, sy + SIZE * 0.4);
+                    ctx.lineTo(sx, sy + SIZE * 1.0);
+                    ctx.lineTo(sx - ISO_X, sy + SIZE * 0.5);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Right
+                    ctx.fillStyle = shadeColor(color, -50);
+                    ctx.beginPath();
+                    ctx.moveTo(sx + ISO_X, sy - SIZE * 0.1);
+                    ctx.lineTo(sx, sy + SIZE * 0.4);
+                    ctx.lineTo(sx, sy + SIZE * 1.0);
+                    ctx.lineTo(sx + ISO_X, sy + SIZE * 0.5);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+        }
+
+        // Player indicator
+        ctx.fillStyle = '#7c3aed';
+        ctx.beginPath();
+        ctx.arc(OX, OY - 20, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    function shadeColor(color, percent) {
+        const num = parseInt(color.replace('#', ''), 16);
+        const r = Math.min(255, Math.max(0, (num >> 16) + percent));
+        const g = Math.min(255, Math.max(0, ((num >> 8) & 0xFF) + percent));
+        const b = Math.min(255, Math.max(0, (num & 0xFF) + percent));
+        return `rgb(${r},${g},${b})`;
+    }
+
+    // === Start ===
+    init();
+    </script>
+</body>
+</html>
