@@ -17,6 +17,31 @@ export class UIManager {
     this._initInventory();
   }
 
+  /**
+   * Build a 3D-looking block face preview using CSS gradients.
+   * Inspired by Minecraft-Javascript-Edition toolbar icons (MIT).
+   */
+  _blockPreviewStyle(colorHex) {
+    if (colorHex === "transparent") return { background: "transparent" };
+    // Parse hex to RGB components
+    const hex = colorHex.replace("#", "");
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    // Top face (lighter)
+    const topR = Math.min(255, r + 40);
+    const topG = Math.min(255, g + 40);
+    const topB = Math.min(255, b + 40);
+    // Side face (darker)
+    const sideR = Math.max(0, r - 30);
+    const sideG = Math.max(0, g - 30);
+    const sideB = Math.max(0, b - 30);
+    return {
+      background: `linear-gradient(135deg, rgb(${topR},${topG},${topB}) 0%, ${colorHex} 50%, rgb(${sideR},${sideG},${sideB}) 100%)`,
+      boxShadow: `inset 1px 1px 0 rgba(255,255,255,0.25), inset -1px -1px 0 rgba(0,0,0,0.25)`,
+    };
+  }
+
   _initHotbar() {
     const hotbar = document.getElementById("hotbar");
     if (!hotbar) return;
@@ -42,7 +67,10 @@ export class UIManager {
       preview.className = "block-preview";
       const blockType = placeableBlocks[i] || BlockType.STONE;
       const color = registry.getColor(blockType);
-      preview.style.background = color !== null ? `#${color.toString(16).padStart(6, "0")}` : "transparent";
+      const colorHex = color !== null ? `#${color.toString(16).padStart(6, "0")}` : "transparent";
+      const style = this._blockPreviewStyle(colorHex);
+      preview.style.background = style.background;
+      if (style.boxShadow) preview.style.boxShadow = style.boxShadow;
       preview.dataset.blockType = blockType;
       slot.appendChild(preview);
 
@@ -70,7 +98,9 @@ export class UIManager {
       slot.className = "inv-slot";
       slot.title = block.name;
       const colorHex = block.color !== null ? `#${block.color.toString(16).padStart(6, "0")}` : "transparent";
-      slot.style.background = colorHex;
+      const style = this._blockPreviewStyle(colorHex);
+      slot.style.background = style.background;
+      if (style.boxShadow) slot.style.boxShadow = style.boxShadow;
       slot.dataset.blockType = block.id;
 
       slot.addEventListener("click", () => {
@@ -78,7 +108,9 @@ export class UIManager {
           this.hotbarSlots[this.selectedSlot].blockType = block.id;
           const preview = this.hotbarSlots[this.selectedSlot].element.querySelector(".block-preview");
           if (preview) {
-            preview.style.background = colorHex;
+            const newStyle = this._blockPreviewStyle(colorHex);
+            preview.style.background = newStyle.background;
+            if (newStyle.boxShadow) preview.style.boxShadow = newStyle.boxShadow;
             preview.dataset.blockType = block.id;
           }
         }
@@ -149,8 +181,11 @@ export class UIManager {
     if (posEl) posEl.textContent = `(${pos.x}, ${pos.y}, ${pos.z})`;
   }
 
-  /** Add chat message */
-  addChatMessage(text, color = "#e0e0e0") {
+  /**
+   * Add chat message with Minecraft-style fade animation.
+   * Reference: minecraft-web-client Chat.css fade behavior (MIT).
+   */
+  addChatMessage(text, color = "#ffffff") {
     const container = document.getElementById("chat-messages");
     if (!container) return;
 
@@ -161,10 +196,14 @@ export class UIManager {
     container.appendChild(msg);
     container.scrollTop = container.scrollHeight;
 
-    // Auto-fade after 10 seconds
+    // Minecraft-style fade: visible 5s, then 3s fade, then hidden
     setTimeout(() => {
+      msg.classList.add("fading");
+    }, 5000);
+    setTimeout(() => {
+      msg.classList.remove("fading");
       msg.classList.add("faded");
-    }, 10000);
+    }, 8000);
 
     // Store
     this.chatMessages.push({ text, color, time: Date.now() });
