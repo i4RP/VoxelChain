@@ -9,9 +9,20 @@ const PING_INTERVAL = 15000;
 
 export class BlockchainSync {
   constructor(rpcUrl = "") {
-    this.rpcUrl = rpcUrl || window.location.origin;
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    this.wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    // Support configurable backend URL for production deployment
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
+    this.rpcUrl = rpcUrl || backendUrl || window.location.origin;
+
+    // Derive WebSocket URL from backend URL or current host
+    let wsHost;
+    if (backendUrl) {
+      const url = new URL(backendUrl);
+      wsHost = url.host;
+    } else {
+      wsHost = window.location.host;
+    }
+    const wsProtocol = (backendUrl ? backendUrl.startsWith("https") : window.location.protocol === "https:") ? "wss:" : "ws:";
+    this.wsUrl = `${wsProtocol}//${wsHost}/ws`;
     this.ws = null;
     this.connected = false;
     this.virtualBlock = 0;

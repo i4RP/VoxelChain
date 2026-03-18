@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "voxelchain-rpc-bridge"
+version = "0.2.0"
+description = "VoxelChain RPC Bridge - Ethereum JSON-RPC + Voxel Game API"
+authors = ["VoxelChain Team"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = {version = "^0.115.0", extras = ["standard"]}
+uvicorn = {version = "^0.34.0", extras = ["standard"]}
+requests = "^2.31.0"
+websockets = "^14.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
