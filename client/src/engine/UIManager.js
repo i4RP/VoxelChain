@@ -108,9 +108,20 @@ export class UIManager {
           this.hotbarSlots[this.selectedSlot].blockType = block.id;
           const preview = this.hotbarSlots[this.selectedSlot].element.querySelector(".block-preview");
           if (preview) {
-            const newStyle = this._blockPreviewStyle(colorHex);
-            preview.style.background = newStyle.background;
-            if (newStyle.boxShadow) preview.style.boxShadow = newStyle.boxShadow;
+            // Use texture atlas if available, otherwise CSS gradient
+            if (this._textureAtlas) {
+              const dataURL = this._textureAtlas.getTextureDataURL(block.id, "top");
+              if (dataURL) {
+                preview.style.background = `url(${dataURL})`;
+                preview.style.backgroundSize = "cover";
+                preview.style.imageRendering = "pixelated";
+                preview.style.boxShadow = "none";
+              }
+            } else {
+              const newStyle = this._blockPreviewStyle(colorHex);
+              preview.style.background = newStyle.background;
+              if (newStyle.boxShadow) preview.style.boxShadow = newStyle.boxShadow;
+            }
             preview.dataset.blockType = block.id;
           }
         }
@@ -126,6 +137,24 @@ export class UIManager {
         document.getElementById("inventory-panel")?.classList.add("hidden");
       });
     }
+  }
+
+  /** Update hotbar block previews with actual texture atlas images */
+  updateHotbarTextures(textureAtlas) {
+    if (!textureAtlas) return;
+    for (const slot of this.hotbarSlots) {
+      const preview = slot.element.querySelector(".block-preview");
+      if (!preview) continue;
+      const blockType = slot.blockType;
+      const dataURL = textureAtlas.getTextureDataURL(blockType, "top");
+      if (dataURL) {
+        preview.style.background = `url(${dataURL})`;
+        preview.style.backgroundSize = "cover";
+        preview.style.imageRendering = "pixelated";
+        preview.style.boxShadow = "none";
+      }
+    }
+    this._textureAtlas = textureAtlas;
   }
 
   selectSlot(index) {

@@ -1,6 +1,7 @@
 /**
  * Chunk class for VoxelChain.
  * Represents a 16x16x16 volume of voxels with optimized mesh generation.
+ * Uses UV-mapped texture atlas for rendering.
  */
 
 import * as THREE from "three";
@@ -59,8 +60,8 @@ export class Chunk {
     this.dirty = true;
   }
 
-  /** Build mesh using greedy meshing for performance */
-  buildMesh(getNeighborBlock) {
+  /** Build mesh with UV-mapped texture atlas */
+  buildMesh(getNeighborBlock, uvMap) {
     if (this.mesh) {
       this.mesh.geometry.dispose();
       if (this.mesh.parent) this.mesh.parent.remove(this.mesh);
@@ -72,10 +73,12 @@ export class Chunk {
 
     const positions = [];
     const normals = [];
+    const uvs = [];
     const colors = [];
     const indices = [];
     const tPositions = [];
     const tNormals = [];
+    const tUvs = [];
     const tColors = [];
     const tIndices = [];
 
@@ -86,14 +89,14 @@ export class Chunk {
     const worldY = this.cy * CHUNK_SIZE;
     const worldZ = this.cz * CHUNK_SIZE;
 
-    // Face definitions: [dx, dy, dz, vertices, normal]
+    // Face definitions with UV corner mapping
     const faces = [
-      { dir: [0, 1, 0], vertices: [[0,1,0],[1,1,0],[1,1,1],[0,1,1]], normal: [0,1,0], face: "top" },
-      { dir: [0, -1, 0], vertices: [[0,0,1],[1,0,1],[1,0,0],[0,0,0]], normal: [0,-1,0], face: "bottom" },
-      { dir: [1, 0, 0], vertices: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]], normal: [1,0,0], face: "side" },
-      { dir: [-1, 0, 0], vertices: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]], normal: [-1,0,0], face: "side" },
-      { dir: [0, 0, 1], vertices: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], normal: [0,0,1], face: "side" },
-      { dir: [0, 0, -1], vertices: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], normal: [0,0,-1], face: "side" },
+      { dir: [0, 1, 0], vertices: [[0,1,0],[1,1,0],[1,1,1],[0,1,1]], normal: [0,1,0], face: "top", uvC: [[0,0],[1,0],[1,1],[0,1]] },
+      { dir: [0, -1, 0], vertices: [[0,0,1],[1,0,1],[1,0,0],[0,0,0]], normal: [0,-1,0], face: "bottom", uvC: [[0,0],[1,0],[1,1],[0,1]] },
+      { dir: [1, 0, 0], vertices: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]], normal: [1,0,0], face: "side", uvC: [[0,0],[0,1],[1,1],[1,0]] },
+      { dir: [-1, 0, 0], vertices: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]], normal: [-1,0,0], face: "side", uvC: [[0,0],[0,1],[1,1],[1,0]] },
+      { dir: [0, 0, 1], vertices: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], normal: [0,0,1], face: "side", uvC: [[0,0],[1,0],[1,1],[0,1]] },
+      { dir: [0, 0, -1], vertices: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], normal: [0,0,-1], face: "side", uvC: [[0,0],[1,0],[1,1],[0,1]] },
     ];
 
     for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -119,35 +122,36 @@ export class Chunk {
               neighborType = this.getBlock(nx, ny, nz);
             }
 
-            // Skip face if neighbor is opaque (or same transparent type)
             const neighborDef = registry.get(neighborType);
             if (neighborType !== 0 && !neighborDef.transparent) continue;
             if (isTransparent && neighborType === blockType) continue;
 
-            // Choose color based on face direction
-            let color;
-            if (face.face === "top") {
-              color = new THREE.Color(registry.getTopColor(blockType));
-            } else if (face.face === "bottom") {
-              color = new THREE.Color(registry.getBottomColor(blockType));
-            } else {
-              color = new THREE.Color(registry.getSideColor(blockType));
+            // Get UV from texture atlas
+            const blockUV = uvMap ? uvMap[blockType] : null;
+            let u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+            if (blockUV) {
+              const faceUV = blockUV[face.face] || blockUV.side || [0, 0, 1, 1];
+              u0 = faceUV[0]; v0 = faceUV[1]; u1 = faceUV[2]; v1 = faceUV[3];
             }
 
-            // Add ambient occlusion darkening
+            // Ambient occlusion
             const ao = face.dir[1] === -1 ? 0.7 : face.dir[1] === 0 ? 0.85 : 1.0;
-            color.multiplyScalar(ao);
 
             const targetPos = isTransparent ? tPositions : positions;
             const targetNorm = isTransparent ? tNormals : normals;
+            const targetUv = isTransparent ? tUvs : uvs;
             const targetCol = isTransparent ? tColors : colors;
             const targetIdx = isTransparent ? tIndices : indices;
             const vc = isTransparent ? tVertexCount : vertexCount;
 
-            for (const v of face.vertices) {
+            for (let vi = 0; vi < 4; vi++) {
+              const v = face.vertices[vi];
               targetPos.push(x + v[0], y + v[1], z + v[2]);
               targetNorm.push(face.normal[0], face.normal[1], face.normal[2]);
-              targetCol.push(color.r, color.g, color.b);
+              const cu = face.uvC[vi][0];
+              const cv = face.uvC[vi][1];
+              targetUv.push(u0 + cu * (u1 - u0), v0 + cv * (v1 - v0));
+              targetCol.push(ao, ao, ao);
             }
 
             targetIdx.push(vc, vc + 1, vc + 2, vc, vc + 2, vc + 3);
@@ -162,36 +166,31 @@ export class Chunk {
       }
     }
 
-    // Build opaque mesh
+    // Build opaque mesh (material set by WorldManager)
     if (positions.length > 0) {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
       geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
       geometry.setIndex(indices);
 
-      const material = new THREE.MeshLambertMaterial({ vertexColors: true });
-      this.mesh = new THREE.Mesh(geometry, material);
+      this.mesh = new THREE.Mesh(geometry, null);
       this.mesh.position.set(worldX, worldY, worldZ);
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
     }
 
-    // Build transparent mesh
+    // Build transparent mesh (material set by WorldManager)
     if (tPositions.length > 0) {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(tPositions, 3));
       geometry.setAttribute("normal", new THREE.Float32BufferAttribute(tNormals, 3));
+      geometry.setAttribute("uv", new THREE.Float32BufferAttribute(tUvs, 2));
       geometry.setAttribute("color", new THREE.Float32BufferAttribute(tColors, 3));
       geometry.setIndex(tIndices);
 
-      const material = new THREE.MeshLambertMaterial({
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.7,
-        side: THREE.DoubleSide,
-      });
-      this.transparentMesh = new THREE.Mesh(geometry, material);
+      this.transparentMesh = new THREE.Mesh(geometry, null);
       this.transparentMesh.position.set(worldX, worldY, worldZ);
       this.transparentMesh.renderOrder = 1;
     }
@@ -203,12 +202,10 @@ export class Chunk {
   dispose() {
     if (this.mesh) {
       this.mesh.geometry.dispose();
-      this.mesh.material.dispose();
       if (this.mesh.parent) this.mesh.parent.remove(this.mesh);
     }
     if (this.transparentMesh) {
       this.transparentMesh.geometry.dispose();
-      this.transparentMesh.material.dispose();
       if (this.transparentMesh.parent) this.transparentMesh.parent.remove(this.transparentMesh);
     }
   }

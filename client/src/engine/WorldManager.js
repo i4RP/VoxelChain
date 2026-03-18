@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { Chunk, CHUNK_SIZE } from "./Chunk.js";
 import { TerrainGenerator } from "./TerrainGenerator.js";
 import { registry } from "./BlockRegistry.js";
+import { TextureAtlas } from "./TextureAtlas.js";
 
 const VIEW_DISTANCE = 4; // chunks
 const UNLOAD_DISTANCE = 6; // chunks
@@ -20,6 +21,28 @@ export class WorldManager {
     this._buildQueue = [];
     this._meshWorker = null;
     this._pendingWorkerBuilds = new Set();
+
+    // Texture atlas
+    this.textureAtlas = new TextureAtlas();
+    this.textureAtlas.generate();
+    this._uvMap = this.textureAtlas.getSerializableUVMap();
+
+    // Shared materials using texture atlas
+    this._opaqueMaterial = new THREE.MeshLambertMaterial({
+      map: this.textureAtlas.texture,
+      vertexColors: true,
+    });
+    this._transparentMaterial = new THREE.MeshLambertMaterial({
+      map: this.textureAtlas.texture,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+    });
+
+    // Water/lava animation state
+    this._animTime = 0;
+
     this._initMeshWorker();
   }
 
@@ -84,9 +107,9 @@ export class WorldManager {
       geo.setAttribute("position", new THREE.BufferAttribute(opaque.positions, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(opaque.normals, 3));
       geo.setAttribute("color", new THREE.BufferAttribute(opaque.colors, 3));
+      if (opaque.uvs) geo.setAttribute("uv", new THREE.BufferAttribute(opaque.uvs, 2));
       geo.setIndex(new THREE.BufferAttribute(opaque.indices, 1));
-      const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-      chunk.mesh = new THREE.Mesh(geo, mat);
+      chunk.mesh = new THREE.Mesh(geo, this._opaqueMaterial);
       chunk.mesh.position.set(worldX, worldY, worldZ);
       chunk.mesh.castShadow = true;
       chunk.mesh.receiveShadow = true;
@@ -98,11 +121,9 @@ export class WorldManager {
       geo.setAttribute("position", new THREE.BufferAttribute(transparent.positions, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(transparent.normals, 3));
       geo.setAttribute("color", new THREE.BufferAttribute(transparent.colors, 3));
+      if (transparent.uvs) geo.setAttribute("uv", new THREE.BufferAttribute(transparent.uvs, 2));
       geo.setIndex(new THREE.BufferAttribute(transparent.indices, 1));
-      const mat = new THREE.MeshLambertMaterial({
-        vertexColors: true, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
-      });
-      chunk.transparentMesh = new THREE.Mesh(geo, mat);
+      chunk.transparentMesh = new THREE.Mesh(geo, this._transparentMaterial);
       chunk.transparentMesh.position.set(worldX, worldY, worldZ);
       chunk.transparentMesh.renderOrder = 1;
       this.scene.add(chunk.transparentMesh);
@@ -264,18 +285,21 @@ export class WorldManager {
         blocks: blocksBuffer,
         neighborBlocks,
         blockDefs: this._blockDefs,
+        uvMap: this._uvMap,
       }, [blocksBuffer]);
       return;
     }
 
     // Fallback: build on main thread
     const getNeighborBlock = (wx, wy, wz) => this.getBlock(wx, wy, wz);
-    chunk.buildMesh(getNeighborBlock);
+    chunk.buildMesh(getNeighborBlock, this._uvMap);
 
     if (chunk.mesh) {
+      chunk.mesh.material = this._opaqueMaterial;
       this.scene.add(chunk.mesh);
     }
     if (chunk.transparentMesh) {
+      chunk.transparentMesh.material = this._transparentMaterial;
       this.scene.add(chunk.transparentMesh);
     }
   }
@@ -312,6 +336,16 @@ export class WorldManager {
       }
     }
     return { hit: false };
+  }
+
+  /** Animate water/lava UV offsets (call each frame) */
+  updateAnimations(dt) {
+    this._animTime += dt;
+    // Subtle UV scroll on transparent material (water/ice/glass)
+    if (this._transparentMaterial.map) {
+      this._transparentMaterial.map.offset.y = Math.sin(this._animTime * 0.8) * 0.02;
+      this._transparentMaterial.map.offset.x = Math.cos(this._animTime * 0.5) * 0.01;
+    }
   }
 
   getChunkCount() {
