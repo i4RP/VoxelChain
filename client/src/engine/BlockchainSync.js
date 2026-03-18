@@ -6,6 +6,7 @@
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
 const PING_INTERVAL = 15000;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 export class BlockchainSync {
   constructor(rpcUrl = "") {
@@ -91,6 +92,15 @@ export class BlockchainSync {
   /** Schedule reconnect with exponential backoff */
   _scheduleReconnect() {
     this._reconnectAttempts++;
+
+    // Switch to standalone mode after max attempts
+    if (this._reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      console.log("[BlockchainSync] Max reconnect attempts reached. Entering standalone mode.");
+      this.standaloneMode = true;
+      this._emit("standaloneMode");
+      return;
+    }
+
     const delay = Math.min(
       RECONNECT_BASE_DELAY * Math.pow(2, this._reconnectAttempts - 1),
       RECONNECT_MAX_DELAY

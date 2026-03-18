@@ -311,6 +311,11 @@ class VoxelChainGame {
       );
     });
 
+    this.blockchain.on("standaloneMode", () => {
+      this.ui.addChatMessage("Standalone mode - Play offline!", "#7c3aed");
+      this.ui.setConnectionStatus(false);
+    });
+
     this.blockchain.on("blockUpdate", (data) => {
       this.ui.updateHUD({
         virtualBlock: data.virtual,
@@ -495,12 +500,14 @@ class VoxelChainGame {
       this.world.setBlock(pos.x, pos.y, pos.z, blockType);
       this.sound.playBlockPlace();
 
-      // Submit to blockchain
-      const player = this.blockchain.walletAddress || "";
-      this.blockchain.placeBlock(pos.x, pos.y, pos.z, blockType, player).catch(() => {
-        // Rollback on failure
-        this.world.setBlock(pos.x, pos.y, pos.z, 0);
-      });
+      // Submit to blockchain (skip in standalone mode)
+      if (!this.blockchain.standaloneMode) {
+        const player = this.blockchain.walletAddress || "";
+        this.blockchain.placeBlock(pos.x, pos.y, pos.z, blockType, player).catch(() => {
+          // Rollback on failure
+          this.world.setBlock(pos.x, pos.y, pos.z, 0);
+        });
+      }
     }
   }
 
@@ -517,12 +524,14 @@ class VoxelChainGame {
       this.world.setBlock(pos.x, pos.y, pos.z, 0);
       this.sound.playBlockBreak();
 
-      // Submit to blockchain
-      const player = this.blockchain.walletAddress || "";
-      this.blockchain.breakBlock(pos.x, pos.y, pos.z, player).catch(() => {
-        // Rollback on failure
-        this.world.setBlock(pos.x, pos.y, pos.z, oldBlock);
-      });
+      // Submit to blockchain (skip in standalone mode)
+      if (!this.blockchain.standaloneMode) {
+        const player = this.blockchain.walletAddress || "";
+        this.blockchain.breakBlock(pos.x, pos.y, pos.z, player).catch(() => {
+          // Rollback on failure
+          this.world.setBlock(pos.x, pos.y, pos.z, oldBlock);
+        });
+      }
     }
   }
 
