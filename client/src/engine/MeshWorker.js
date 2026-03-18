@@ -1,41 +1,23 @@
 /**
  * WebWorker for chunk mesh generation.
  * Offloads geometry computation from the main thread for better FPS.
+ * Supports UV-mapped texture atlas.
  *
- * Messages IN:  { type: "buildMesh", chunkKey, cx, cy, cz, blocks, neighborBlocks, blockDefs }
- * Messages OUT: { type: "meshBuilt", chunkKey, opaque: {positions,normals,colors,indices}, transparent: {positions,normals,colors,indices} }
+ * Messages IN:  { type: "buildMesh", chunkKey, blocks, neighborBlocks, blockDefs, uvMap }
+ * Messages OUT: { type: "meshBuilt", chunkKey, opaque: {positions,normals,uvs,colors,indices}, transparent: {...} }
  */
 
 const CHUNK_SIZE = 16;
 
-// Face definitions matching Chunk.js
+// Face definitions with UV corner mapping (matching Chunk.js)
 const FACES = [
-  { dir: [0, 1, 0], verts: [[0,1,0],[1,1,0],[1,1,1],[0,1,1]], normal: [0,1,0], face: "top" },
-  { dir: [0, -1, 0], verts: [[0,0,1],[1,0,1],[1,0,0],[0,0,0]], normal: [0,-1,0], face: "bottom" },
-  { dir: [1, 0, 0], verts: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]], normal: [1,0,0], face: "side" },
-  { dir: [-1, 0, 0], verts: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]], normal: [-1,0,0], face: "side" },
-  { dir: [0, 0, 1], verts: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], normal: [0,0,1], face: "side" },
-  { dir: [0, 0, -1], verts: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], normal: [0,0,-1], face: "side" },
+  { dir: [0, 1, 0], verts: [[0,1,0],[1,1,0],[1,1,1],[0,1,1]], normal: [0,1,0], face: "top", uvC: [[0,0],[1,0],[1,1],[0,1]] },
+  { dir: [0, -1, 0], verts: [[0,0,1],[1,0,1],[1,0,0],[0,0,0]], normal: [0,-1,0], face: "bottom", uvC: [[0,0],[1,0],[1,1],[0,1]] },
+  { dir: [1, 0, 0], verts: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]], normal: [1,0,0], face: "side", uvC: [[0,0],[0,1],[1,1],[1,0]] },
+  { dir: [-1, 0, 0], verts: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]], normal: [-1,0,0], face: "side", uvC: [[0,0],[0,1],[1,1],[1,0]] },
+  { dir: [0, 0, 1], verts: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], normal: [0,0,1], face: "side", uvC: [[0,0],[1,0],[1,1],[0,1]] },
+  { dir: [0, 0, -1], verts: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], normal: [0,0,-1], face: "side", uvC: [[0,0],[1,0],[1,1],[0,1]] },
 ];
-
-/** Convert hex color to [r, g, b] floats */
-function hexToRgb(hex) {
-  return [
-    ((hex >> 16) & 0xff) / 255,
-    ((hex >> 8) & 0xff) / 255,
-    (hex & 0xff) / 255,
-  ];
-}
-
-function getBlockColor(blockDefs, blockType, faceName) {
-  const def = blockDefs[blockType];
-  if (!def) return [0.5, 0.5, 0.5];
-  let hex;
-  if (faceName === "top") hex = def.topColor || def.color || 0x808080;
-  else if (faceName === "bottom") hex = def.bottomColor || def.sideColor || def.color || 0x808080;
-  else hex = def.sideColor || def.color || 0x808080;
-  return hexToRgb(hex);
-}
 
 function isTransparent(blockDefs, blockType) {
   const def = blockDefs[blockType];
@@ -43,15 +25,11 @@ function isTransparent(blockDefs, blockType) {
 }
 
 /**
- * Build mesh geometry data for a chunk.
- * @param {Uint16Array} blocks - Flat array of block types
- * @param {Object} neighborBlocks - Map of "dx,dy,dz" -> block type at boundary
- * @param {Object} blockDefs - Block definitions keyed by type ID
- * @returns {{ opaque, transparent }} geometry data
+ * Build mesh geometry data for a chunk with UV texture atlas support.
  */
-function buildMeshData(blocks, neighborBlocks, blockDefs) {
-  const positions = [], normals = [], colors = [], indices = [];
-  const tPositions = [], tNormals = [], tColors = [], tIndices = [];
+function buildMeshData(blocks, neighborBlocks, blockDefs, uvMap) {
+  const positions = [], normals = [], uvs = [], colors = [], indices = [];
+  const tPositions = [], tNormals = [], tUvs = [], tColors = [], tIndices = [];
   let vc = 0, tvc = 0;
 
   for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -70,7 +48,6 @@ function buildMeshData(blocks, neighborBlocks, blockDefs) {
 
           let neighborType;
           if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_SIZE || nz < 0 || nz >= CHUNK_SIZE) {
-            // Look up from neighbor data
             const key = `${nx},${ny},${nz}`;
             neighborType = neighborBlocks[key] || 0;
           } else {
@@ -81,19 +58,31 @@ function buildMeshData(blocks, neighborBlocks, blockDefs) {
           if (neighborType !== 0 && nDef && !nDef.transparent) continue;
           if (isT && neighborType === bt) continue;
 
-          const [cr, cg, cb] = getBlockColor(blockDefs, bt, face.face);
+          // Get UV from atlas map
+          const blockUV = uvMap ? uvMap[bt] : null;
+          let u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+          if (blockUV) {
+            const faceUV = blockUV[face.face] || blockUV.side || [0, 0, 1, 1];
+            u0 = faceUV[0]; v0 = faceUV[1]; u1 = faceUV[2]; v1 = faceUV[3];
+          }
+
           const ao = face.dir[1] === -1 ? 0.7 : face.dir[1] === 0 ? 0.85 : 1.0;
 
           const tP = isT ? tPositions : positions;
           const tN = isT ? tNormals : normals;
+          const tU = isT ? tUvs : uvs;
           const tC = isT ? tColors : colors;
           const tI = isT ? tIndices : indices;
           const curVc = isT ? tvc : vc;
 
-          for (const v of face.verts) {
+          for (let vi = 0; vi < 4; vi++) {
+            const v = face.verts[vi];
             tP.push(x + v[0], y + v[1], z + v[2]);
             tN.push(face.normal[0], face.normal[1], face.normal[2]);
-            tC.push(cr * ao, cg * ao, cb * ao);
+            const cu = face.uvC[vi][0];
+            const cv = face.uvC[vi][1];
+            tU.push(u0 + cu * (u1 - u0), v0 + cv * (v1 - v0));
+            tC.push(ao, ao, ao);
           }
           tI.push(curVc, curVc + 1, curVc + 2, curVc, curVc + 2, curVc + 3);
 
@@ -106,22 +95,23 @@ function buildMeshData(blocks, neighborBlocks, blockDefs) {
 
   return {
     opaque: positions.length > 0
-      ? { positions: new Float32Array(positions), normals: new Float32Array(normals), colors: new Float32Array(colors), indices: new Uint32Array(indices) }
+      ? { positions: new Float32Array(positions), normals: new Float32Array(normals), uvs: new Float32Array(uvs), colors: new Float32Array(colors), indices: new Uint32Array(indices) }
       : null,
     transparent: tPositions.length > 0
-      ? { positions: new Float32Array(tPositions), normals: new Float32Array(tNormals), colors: new Float32Array(tColors), indices: new Uint32Array(tIndices) }
+      ? { positions: new Float32Array(tPositions), normals: new Float32Array(tNormals), uvs: new Float32Array(tUvs), colors: new Float32Array(tColors), indices: new Uint32Array(tIndices) }
       : null,
   };
 }
 
 self.onmessage = function (e) {
-  const { type, chunkKey, blocks, neighborBlocks, blockDefs } = e.data;
+  const { type, chunkKey, blocks, neighborBlocks, blockDefs, uvMap } = e.data;
   if (type !== "buildMesh") return;
 
   const result = buildMeshData(
     new Uint16Array(blocks),
     neighborBlocks || {},
-    blockDefs || {}
+    blockDefs || {},
+    uvMap || null
   );
 
   // Transfer typed arrays for zero-copy performance
@@ -130,6 +120,7 @@ self.onmessage = function (e) {
     transferables.push(
       result.opaque.positions.buffer,
       result.opaque.normals.buffer,
+      result.opaque.uvs.buffer,
       result.opaque.colors.buffer,
       result.opaque.indices.buffer
     );
@@ -138,6 +129,7 @@ self.onmessage = function (e) {
     transferables.push(
       result.transparent.positions.buffer,
       result.transparent.normals.buffer,
+      result.transparent.uvs.buffer,
       result.transparent.colors.buffer,
       result.transparent.indices.buffer
     );

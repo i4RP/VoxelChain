@@ -15,6 +15,8 @@ import { AIObserver } from "./engine/AIObserver.js";
 import { AICommandServer } from "./engine/AICommandServer.js";
 import { SoundManager } from "./engine/SoundManager.js";
 import { TouchController } from "./engine/TouchController.js";
+import { ParticleSystem } from "./engine/ParticleSystem.js";
+import { SkyManager } from "./engine/SkyManager.js";
 
 class VoxelChainGame {
   constructor() {
@@ -37,6 +39,10 @@ class VoxelChainGame {
     this.touch = null;
     this._footstepTimer = 0;
 
+    // Visual effects
+    this.particles = null;
+    this.sky = null;
+
     this.clock = new THREE.Clock();
     this.frameCount = 0;
     this.fpsTimer = 0;
@@ -53,11 +59,22 @@ class VoxelChainGame {
     this.ui.setLoadProgress(20, "Setting up scene...");
 
     this._setupScene();
+    this.ui.setLoadProgress(25, "Creating sky...");
+
+    // Sky system (sun, moon, clouds, stars)
+    this.sky = new SkyManager(this.scene);
     this.ui.setLoadProgress(30, "Building world...");
 
     // World
     this.world = new WorldManager(this.scene);
+    this.ui.setLoadProgress(35, "Setting up particles...");
+
+    // Particle system
+    this.particles = new ParticleSystem(this.scene);
     this.ui.setLoadProgress(40, "Initializing controls...");
+
+    // Update UI hotbar with texture previews from atlas
+    this.ui.updateHotbarTextures(this.world.textureAtlas);
 
     // Input
     this.input = new InputController(this.camera, this.renderer.domElement, this.world);
@@ -494,6 +511,7 @@ class VoxelChainGame {
       // Place locally first (optimistic)
       this.world.setBlock(pos.x, pos.y, pos.z, blockType);
       this.sound.playBlockPlace();
+      this.particles.spawnBlockPlace(pos.x, pos.y, pos.z, blockType);
 
       // Submit to blockchain
       const player = this.blockchain.walletAddress || "";
@@ -516,6 +534,7 @@ class VoxelChainGame {
       // Remove locally first (optimistic)
       this.world.setBlock(pos.x, pos.y, pos.z, 0);
       this.sound.playBlockBreak();
+      this.particles.spawnBlockBreak(pos.x, pos.y, pos.z, oldBlock);
 
       // Submit to blockchain
       const player = this.blockchain.walletAddress || "";
@@ -544,6 +563,9 @@ class VoxelChainGame {
     // Update
     this.input.update(dt);
     this.world.update(this.input.position);
+    this.world.updateAnimations(dt);
+    if (this.particles) this.particles.update(dt);
+    if (this.sky) this.sky.update(dt);
 
     // Footstep sounds (walking mode only)
     if (!this.input.flyMode && this.input.onGround && this.input.isLocked) {
