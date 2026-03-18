@@ -137,6 +137,125 @@ export class SoundManager {
     osc.stop(now + 0.15);
   }
 
+  /** Play damage/hurt sound - harsh buzz */
+  playDamage() {
+    if (!this._ctx || !this._enabled) return;
+    this.resume();
+    const now = this._ctx.currentTime;
+
+    // Harsh buzz
+    const osc = this._ctx.createOscillator();
+    const gain = this._ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(200, now);
+    osc.frequency.exponentialRampToValueAtTime(80, now + 0.2);
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc.connect(gain);
+    gain.connect(this._masterGain);
+    osc.start(now);
+    osc.stop(now + 0.25);
+
+    // High click
+    const osc2 = this._ctx.createOscillator();
+    const gain2 = this._ctx.createGain();
+    osc2.type = "square";
+    osc2.frequency.setValueAtTime(600, now);
+    osc2.frequency.exponentialRampToValueAtTime(200, now + 0.1);
+    gain2.gain.setValueAtTime(0.15, now);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc2.connect(gain2);
+    gain2.connect(this._masterGain);
+    osc2.start(now);
+    osc2.stop(now + 0.12);
+  }
+
+  /** Play death sound - descending tone */
+  playDeath() {
+    if (!this._ctx || !this._enabled) return;
+    this.resume();
+    const now = this._ctx.currentTime;
+
+    const osc = this._ctx.createOscillator();
+    const gain = this._ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.6);
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.linearRampToValueAtTime(0.001, now + 0.8);
+    osc.connect(gain);
+    gain.connect(this._masterGain);
+    osc.start(now);
+    osc.stop(now + 0.8);
+
+    // Second lower tone
+    const osc2 = this._ctx.createOscillator();
+    const gain2 = this._ctx.createGain();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(330, now + 0.15);
+    osc2.frequency.exponentialRampToValueAtTime(80, now + 0.7);
+    gain2.gain.setValueAtTime(0, now);
+    gain2.gain.linearRampToValueAtTime(0.2, now + 0.15);
+    gain2.gain.linearRampToValueAtTime(0.001, now + 0.8);
+    osc2.connect(gain2);
+    gain2.connect(this._masterGain);
+    osc2.start(now);
+    osc2.stop(now + 0.8);
+  }
+
+  /** Play crafting sound - two ascending tones */
+  playCraft() {
+    if (!this._ctx || !this._enabled) return;
+    this.resume();
+    const now = this._ctx.currentTime;
+
+    const osc = this._ctx.createOscillator();
+    const gain = this._ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.setValueAtTime(660, now + 0.08);
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc.connect(gain);
+    gain.connect(this._masterGain);
+    osc.start(now);
+    osc.stop(now + 0.2);
+
+    this._playNoiseBurst(now, 0.05, 0.1, 4000, 8000);
+  }
+
+  /** Play item pickup sound - short ascending blip */
+  playPickup() {
+    if (!this._ctx || !this._enabled) return;
+    this.resume();
+    const now = this._ctx.currentTime;
+
+    const osc = this._ctx.createOscillator();
+    const gain = this._ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.06);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(this._masterGain);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }
+
+  /** Play eat/consume sound */
+  playEat() {
+    if (!this._ctx || !this._enabled) return;
+    this.resume();
+    const now = this._ctx.currentTime;
+
+    // Crunchy noise bursts
+    for (let i = 0; i < 3; i++) {
+      const t = now + i * 0.08;
+      this._playNoiseBurst(t, 0.04, 0.15, 1000, 3000);
+    }
+  }
+
   /** Play chat receive blip */
   playChatReceive() {
     if (!this._ctx || !this._enabled) return;

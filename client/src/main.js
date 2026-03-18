@@ -17,6 +17,8 @@ import { SoundManager } from "./engine/SoundManager.js";
 import { TouchController } from "./engine/TouchController.js";
 import { ParticleSystem } from "./engine/ParticleSystem.js";
 import { SkyManager } from "./engine/SkyManager.js";
+import { SurvivalSystem } from "./engine/SurvivalSystem.js";
+import { CraftingSystem } from "./engine/CraftingSystem.js";
 
 class VoxelChainGame {
   constructor() {
@@ -42,6 +44,10 @@ class VoxelChainGame {
     // Visual effects
     this.particles = null;
     this.sky = null;
+
+    // Survival systems
+    this.survival = null;
+    this.crafting = null;
 
     this.clock = new THREE.Clock();
     this.frameCount = 0;
@@ -148,6 +154,12 @@ class VoxelChainGame {
     // Touch controls (auto-detects mobile)
     this.touch = new TouchController(this.input);
 
+    // Survival & Crafting systems
+    this.ui.setLoadProgress(80, "Setting up survival systems...");
+    this.survival = new SurvivalSystem(this);
+    this.crafting = new CraftingSystem(this.survival);
+    this._setupSurvivalUI();
+
     // AI Agent Support
     this.ui.setLoadProgress(85, "Setting up AI systems...");
     this._setupAISupport();
@@ -164,6 +176,7 @@ class VoxelChainGame {
     } else {
       this.ui.addChatMessage("Welcome to VoxelChain! Click to enter, WASD to move, F to toggle fly.", "#7c3aed");
       this.ui.addChatMessage("Left-click to break, right-click to place. 1-9 for blocks.", "#666");
+      this.ui.addChatMessage("Press C for crafting. Toggle Survival mode with the button above.", "#666");
     }
 
     // Start ambient sound after first user interaction
@@ -499,7 +512,41 @@ class VoxelChainGame {
     return (hash & 0x00FFFFFF);
   }
 
+  /** Set up survival mode UI and keybindings */
+  _setupSurvivalUI() {
+    // Game mode toggle button
+    const gamemodeBtn = document.getElementById("gamemode-btn");
+    if (gamemodeBtn) {
+      gamemodeBtn.addEventListener("click", () => {
+        const newMode = this.survival.gameMode === "creative" ? "survival" : "creative";
+        this.survival.setGameMode(newMode);
+        this.ui.updateGameModeDisplay(newMode);
+        this.ui.addChatMessage(`Game mode: ${newMode}`, "#ffaa00");
+      });
+    }
+    // Initialize display (starts in creative)
+    this.ui.updateGameModeDisplay(this.survival.gameMode);
+
+    // Crafting panel toggle (C key)
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "KeyC" && !e.ctrlKey && !e.metaKey) {
+        const chatInput = document.getElementById("chat-input");
+        if (chatInput && !chatInput.classList.contains("hidden")) return;
+        const craftPanel = document.getElementById("crafting-panel");
+        if (craftPanel) {
+          craftPanel.classList.toggle("hidden");
+          if (!craftPanel.classList.contains("hidden")) {
+            this.ui.updateCraftingPanel(this.crafting);
+          }
+        }
+      }
+    });
+  }
+
   _handleBlockPlace() {
+    // In survival mode, check if player is alive and has blocks
+    if (this.survival && this.survival.gameMode === "survival" && !this.survival.alive) return;
+
     const ray = this.world.raycast(
       this.input.getEyePosition(),
       this.input.getLookDirection()
@@ -507,6 +554,14 @@ class VoxelChainGame {
     if (ray.hit) {
       const pos = ray.placePos;
       const blockType = this.ui.getSelectedBlockType();
+
+      // In survival mode, consume from inventory
+      if (this.survival && this.survival.gameMode === "survival") {
+        if (!this.survival.removeFromInventory(blockType, 1)) {
+          this.ui.addChatMessage("No blocks of this type in inventory!", "#ef4444");
+          return;
+        }
+      }
 
       // Place locally first (optimistic)
       this.world.setBlock(pos.x, pos.y, pos.z, blockType);
@@ -518,11 +573,18 @@ class VoxelChainGame {
       this.blockchain.placeBlock(pos.x, pos.y, pos.z, blockType, player).catch(() => {
         // Rollback on failure
         this.world.setBlock(pos.x, pos.y, pos.z, 0);
+        // Return block to inventory
+        if (this.survival && this.survival.gameMode === "survival") {
+          this.survival.addToInventory(blockType, 1);
+        }
       });
     }
   }
 
   _handleBlockBreak() {
+    // In survival mode, check if player is alive
+    if (this.survival && this.survival.gameMode === "survival" && !this.survival.alive) return;
+
     const ray = this.world.raycast(
       this.input.getEyePosition(),
       this.input.getLookDirection()
@@ -536,11 +598,21 @@ class VoxelChainGame {
       this.sound.playBlockBreak();
       this.particles.spawnBlockBreak(pos.x, pos.y, pos.z, oldBlock);
 
+      // In survival mode, add to inventory
+      if (this.survival && this.survival.gameMode === "survival" && oldBlock !== 0) {
+        this.survival.addToInventory(oldBlock, 1);
+        this.sound.playPickup();
+      }
+
       // Submit to blockchain
       const player = this.blockchain.walletAddress || "";
       this.blockchain.breakBlock(pos.x, pos.y, pos.z, player).catch(() => {
         // Rollback on failure
         this.world.setBlock(pos.x, pos.y, pos.z, oldBlock);
+        // Remove from inventory
+        if (this.survival && this.survival.gameMode === "survival") {
+          this.survival.removeFromInventory(oldBlock, 1);
+        }
       });
     }
   }
@@ -566,6 +638,7 @@ class VoxelChainGame {
     this.world.updateAnimations(dt);
     if (this.particles) this.particles.update(dt);
     if (this.sky) this.sky.update(dt);
+    if (this.survival) this.survival.update(dt);
 
     // Footstep sounds (walking mode only)
     if (!this.input.flyMode && this.input.onGround && this.input.isLocked) {
@@ -606,6 +679,16 @@ class VoxelChainGame {
       fps: this.currentFps,
       position: this.input.position,
     });
+
+    // Survival HUD
+    if (this.survival) {
+      this.ui.updateSurvivalHUD(this.survival);
+    }
+
+    // Inventory counts (every 5 frames)
+    if (this.frameCount % 5 === 0 && this.survival) {
+      this.ui.updateInventoryCounts(this.survival);
+    }
 
     // Minimap (every 10 frames)
     if (this.frameCount % 10 === 0) {

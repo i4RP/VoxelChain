@@ -11,10 +11,12 @@ export class UIManager {
     this.selectedSlot = 0;
     this.chatMessages = [];
     this.minimapCtx = null;
+    this._survivalMode = false;
 
     this._initHotbar();
     this._initMinimap();
     this._initInventory();
+    this._initCrafting();
   }
 
   /**
@@ -315,6 +317,140 @@ export class UIManager {
       }
       e.stopPropagation();
     });
+  }
+
+  /** Initialize crafting panel */
+  _initCrafting() {
+    const closeBtn = document.getElementById("crafting-close");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", () => {
+        document.getElementById("crafting-panel")?.classList.add("hidden");
+      });
+    }
+  }
+
+  /** Update crafting panel with recipes */
+  updateCraftingPanel(craftingSystem) {
+    const grid = document.getElementById("crafting-grid");
+    if (!grid || !craftingSystem) return;
+    grid.innerHTML = "";
+
+    const recipes = craftingSystem.getRecipes();
+    for (const recipe of recipes) {
+      const row = document.createElement("div");
+      const canCraft = craftingSystem.canCraft(recipe.id);
+      row.className = "craft-recipe" + (canCraft ? "" : " disabled");
+
+      // Build inputs text
+      const inputsText = recipe.inputs
+        .map((inp) => `<span class="craft-count">${inp.count}x</span> <span class="craft-input">${registry.getName(inp.type)}</span>`)
+        .join(" + ");
+
+      row.innerHTML = `${inputsText} <span class="craft-arrow">-></span> <span class="craft-count">${recipe.output.count}x</span> <span class="craft-output">${recipe.output.name}</span>`;
+
+      if (canCraft) {
+        row.addEventListener("click", () => {
+          const result = craftingSystem.craft(recipe.id);
+          if (result && result.success) {
+            this.addChatMessage(`Crafted ${result.output.count}x ${result.recipe}`, "#10b981");
+            this.updateCraftingPanel(craftingSystem);
+          }
+        });
+      }
+      grid.appendChild(row);
+    }
+  }
+
+  /** Update survival HUD (HP bar, hunger bar) */
+  updateSurvivalHUD(survivalSystem) {
+    if (!survivalSystem) return;
+    const isSurvival = survivalSystem.gameMode === "survival";
+
+    // Show/hide survival HUD
+    const survHud = document.getElementById("survival-hud");
+    if (survHud) {
+      if (isSurvival) {
+        survHud.classList.remove("hidden");
+      } else {
+        survHud.classList.add("hidden");
+      }
+    }
+
+    if (!isSurvival) return;
+
+    // HP bar
+    const hpFill = document.getElementById("hp-fill");
+    const hpLabel = document.getElementById("hp-label");
+    if (hpFill) hpFill.style.width = `${(survivalSystem.hp / survivalSystem.maxHp) * 100}%`;
+    if (hpLabel) hpLabel.textContent = `${Math.ceil(survivalSystem.hp)}/${survivalSystem.maxHp}`;
+
+    // Hunger bar
+    const hungerFill = document.getElementById("hunger-fill");
+    const hungerLabel = document.getElementById("hunger-label");
+    if (hungerFill) hungerFill.style.width = `${(survivalSystem.hunger / survivalSystem.maxHunger) * 100}%`;
+    if (hungerLabel) hungerLabel.textContent = `${Math.ceil(survivalSystem.hunger)}/${survivalSystem.maxHunger}`;
+
+    // Damage flash
+    const flash = document.getElementById("damage-flash");
+    if (flash) {
+      flash.style.opacity = survivalSystem.isDamageFlashing() ? survivalSystem.getDamageFlashIntensity() : 0;
+    }
+
+    // Death screen
+    const deathScreen = document.getElementById("death-screen");
+    if (deathScreen) {
+      if (survivalSystem.isRespawning()) {
+        deathScreen.classList.remove("hidden");
+        const progressFill = document.getElementById("death-progress-fill");
+        if (progressFill) progressFill.style.width = `${survivalSystem.getRespawnProgress() * 100}%`;
+        const deathMsg = document.getElementById("death-message");
+        if (deathMsg) deathMsg.textContent = `Deaths: ${survivalSystem.deathCount}`;
+      } else {
+        deathScreen.classList.add("hidden");
+      }
+    }
+  }
+
+  /** Update game mode display */
+  updateGameModeDisplay(mode) {
+    const el = document.getElementById("hud-gamemode");
+    if (el) {
+      el.textContent = mode === "survival" ? "Survival" : "Creative";
+      el.style.color = mode === "survival" ? "#ff5555" : "#ffaa00";
+    }
+    const btn = document.getElementById("gamemode-btn");
+    if (btn) {
+      btn.textContent = mode === "survival" ? "Creative" : "Survival";
+    }
+  }
+
+  /** Update inventory count overlay on hotbar */
+  updateInventoryCounts(survivalSystem) {
+    const overlay = document.getElementById("inv-count-overlay");
+    if (!overlay) return;
+
+    if (!survivalSystem || survivalSystem.gameMode !== "survival") {
+      overlay.classList.add("hidden");
+      return;
+    }
+    overlay.classList.remove("hidden");
+    overlay.innerHTML = "";
+
+    for (let i = 0; i < 9; i++) {
+      const slot = document.createElement("div");
+      slot.className = "inv-count-slot";
+      const blockType = this.hotbarSlots[i]?.blockType;
+      if (blockType !== undefined) {
+        const count = survivalSystem.getInventoryCount(blockType);
+        if (count > 0) {
+          const num = document.createElement("span");
+          num.className = "inv-count-num";
+          num.textContent = count;
+          slot.appendChild(num);
+        }
+      }
+      overlay.appendChild(slot);
+    }
   }
 
   /** Set loading progress */
