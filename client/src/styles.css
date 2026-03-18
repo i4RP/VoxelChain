@@ -502,4 +502,255 @@ body {
 
     #wallet-btn { padding: 3px 6px; font-size: 0.4rem; }
     #block-info { font-size: 0.4rem; right: 4px; }
+
+    #survival-hud { bottom: 52px; }
+    .survival-bar { width: 140px; height: 8px; }
+    .survival-bar-label { font-size: 0.35rem; }
+
+    #death-screen .death-title { font-size: 1.2rem; }
+    #death-screen .death-sub { font-size: 0.5rem; }
+
+    #crafting-panel { width: 300px; }
+}
+
+/* ==========================================================================
+   Survival HUD - HP & Hunger bars above hotbar
+   ========================================================================== */
+#survival-hud {
+    position: fixed;
+    bottom: 66px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 21;
+    pointer-events: none;
+}
+.survival-bar-group {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+.survival-bar {
+    width: 182px;
+    height: 10px;
+    background: var(--mc-dark);
+    border: 2px solid;
+    border-color: var(--mc-border-dark) var(--mc-border-light) var(--mc-border-light) var(--mc-border-dark);
+    position: relative;
+    overflow: hidden;
+}
+.survival-bar-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+    width: 100%;
+}
+.hp-fill {
+    background: linear-gradient(180deg, #ff4444 0%, #cc0000 50%, #aa0000 100%);
+}
+.hunger-fill {
+    background: linear-gradient(180deg, #c89040 0%, #a07030 50%, #886020 100%);
+}
+.survival-bar-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--font-mc);
+    font-size: 0.4rem;
+    color: var(--mc-white);
+    text-shadow: 1px 1px 0 #000;
+    line-height: 1;
+    white-space: nowrap;
+}
+#hp-bar::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 10px;
+    background: #cc0000;
+    clip-path: polygon(50% 0%, 100% 35%, 80% 100%, 50% 75%, 20% 100%, 0% 35%);
+    z-index: 1;
+}
+#hunger-bar::after {
+    content: '';
+    position: absolute;
+    right: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 10px;
+    background: #a07030;
+    clip-path: polygon(50% 0%, 80% 30%, 100% 50%, 80% 70%, 50% 100%, 20% 70%, 0% 50%, 20% 30%);
+    z-index: 1;
+}
+
+/* ==========================================================================
+   Game Mode Toggle Button
+   ========================================================================== */
+#gamemode-btn {
+    font-family: var(--font-mc);
+    font-size: 0.45rem;
+    background: linear-gradient(180deg, #6d6d6d 0%, #4a4a4a 50%, #3a3a3a 100%);
+    border: 2px outset #888;
+    color: var(--mc-white);
+    text-shadow: 1px 1px 0 var(--mc-shadow);
+    padding: 3px 6px;
+    cursor: pointer;
+}
+#gamemode-btn:hover {
+    background: linear-gradient(180deg, #88cc88 0%, #66aa66 50%, #559955 100%);
+}
+#gamemode-btn:active {
+    border-style: inset;
+}
+#hud-gamemode {
+    font-family: var(--font-mc);
+    font-size: 0.5rem;
+    text-shadow: 1px 1px 0 #000;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 1px 4px;
+    color: var(--mc-gold);
+}
+
+/* ==========================================================================
+   Death Screen
+   ========================================================================== */
+#death-screen {
+    position: fixed;
+    inset: 0;
+    background: rgba(200, 0, 0, 0.6);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.death-content {
+    text-align: center;
+}
+.death-title {
+    font-family: var(--font-mc);
+    font-size: 2rem;
+    color: var(--mc-white);
+    text-shadow: 3px 3px 0 #000;
+    margin-bottom: 12px;
+}
+.death-sub {
+    font-family: var(--font-mc);
+    font-size: 0.6rem;
+    color: #ddd;
+    text-shadow: 1px 1px 0 #000;
+    margin-bottom: 16px;
+}
+.death-progress {
+    width: 200px;
+    height: 6px;
+    background: #333;
+    border: 1px solid #555;
+    margin: 0 auto 10px;
+    overflow: hidden;
+}
+.death-progress-fill {
+    height: 100%;
+    background: var(--mc-white);
+    width: 0%;
+    transition: width 0.1s linear;
+}
+.death-hint {
+    font-family: var(--font-mc);
+    font-size: 0.5rem;
+    color: #aaa;
+    text-shadow: 1px 1px 0 #000;
+}
+
+/* ==========================================================================
+   Damage Flash Overlay
+   ========================================================================== */
+#damage-flash {
+    position: fixed;
+    inset: 0;
+    background: rgba(255, 0, 0, 0.4);
+    pointer-events: none;
+    z-index: 50;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+/* ==========================================================================
+   Crafting Panel
+   ========================================================================== */
+#crafting-panel {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 380px;
+    max-height: 400px;
+}
+#crafting-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+.craft-recipe {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--mc-border-dark);
+    cursor: pointer;
+    font-family: var(--font-mc);
+    font-size: 0.4rem;
+    color: var(--mc-white);
+    text-shadow: 1px 1px 0 #000;
+}
+.craft-recipe:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--mc-select);
+}
+.craft-recipe.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.craft-recipe .craft-arrow {
+    color: var(--mc-gold);
+    font-size: 0.5rem;
+}
+.craft-recipe .craft-output {
+    color: var(--mc-green);
+}
+.craft-recipe .craft-input {
+    color: #ccc;
+}
+.craft-recipe .craft-count {
+    color: var(--mc-aqua);
+}
+
+/* ==========================================================================
+   Inventory Count Overlay (survival mode)
+   ========================================================================== */
+#inv-count-overlay {
+    position: fixed;
+    bottom: 58px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 0px;
+    z-index: 22;
+    pointer-events: none;
+    padding: 0 6px;
+}
+.inv-count-slot {
+    width: 48px;
+    text-align: center;
+    margin: 0 1px;
+}
+.inv-count-num {
+    font-family: var(--font-mc);
+    font-size: 0.4rem;
+    color: var(--mc-white);
+    text-shadow: 1px 1px 0 #000;
 }

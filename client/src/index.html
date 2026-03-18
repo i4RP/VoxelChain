@@ -23,8 +23,10 @@
             <span class="hud-badge green">Real: <span id="hud-rblock">-</span></span>
             <span class="hud-badge" id="hud-fps">FPS: -</span>
             <span id="hud-pos">X: 0 Y: 0 Z: 0</span>
+            <span class="hud-badge" id="hud-gamemode">Creative</span>
         </div>
         <div class="hud-right">
+            <button id="gamemode-btn" title="Toggle game mode">Survival</button>
             <button id="sound-toggle" title="Toggle sound">Sound: ON</button>
             <div id="connection-status" class="conn-status disconnected" title="Disconnected"></div>
             <span class="wallet-addr" id="wallet-addr"></span>
@@ -32,7 +34,24 @@
         </div>
     </div>
 
+    <!-- Survival HUD: HP and Hunger bars -->
+    <div id="survival-hud" class="hidden">
+        <div class="survival-bar-group">
+            <div class="survival-bar" id="hp-bar">
+                <div class="survival-bar-fill hp-fill" id="hp-fill"></div>
+                <span class="survival-bar-label" id="hp-label">20/20</span>
+            </div>
+            <div class="survival-bar" id="hunger-bar">
+                <div class="survival-bar-fill hunger-fill" id="hunger-fill"></div>
+                <span class="survival-bar-label" id="hunger-label">20/20</span>
+            </div>
+        </div>
+    </div>
+
     <div id="hotbar"></div>
+
+    <!-- Inventory count overlay for survival mode -->
+    <div id="inv-count-overlay" class="hidden"></div>
 
     <div id="inventory-panel" class="panel hidden">
         <div class="panel-header">
@@ -54,6 +73,30 @@
     <div id="block-info" class="hidden">
         <span id="block-info-name"></span>
         <span id="block-info-pos"></span>
+    </div>
+
+    <!-- Death screen -->
+    <div id="death-screen" class="hidden">
+        <div class="death-content">
+            <h2 class="death-title">You Died!</h2>
+            <p class="death-sub" id="death-message">Score: 0</p>
+            <div class="death-progress">
+                <div class="death-progress-fill" id="death-progress-fill"></div>
+            </div>
+            <p class="death-hint">Respawning...</p>
+        </div>
+    </div>
+
+    <!-- Damage flash overlay -->
+    <div id="damage-flash"></div>
+
+    <!-- Crafting panel -->
+    <div id="crafting-panel" class="panel hidden">
+        <div class="panel-header">
+            <span>Crafting</span>
+            <button class="panel-close" id="crafting-close">&times;</button>
+        </div>
+        <div class="panel-body" id="crafting-grid"></div>
     </div>
 
     <script type="module" src="main.js"></script>
